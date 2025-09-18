@@ -2908,7 +2908,7 @@ function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
     ctx.lineTo(aiTargetX, aiTargetY);
     ctx.stroke();
     
-    ctx.fillStyle = '#ff0000';
+   /* ctx.fillStyle = '#ff0000';
     ctx.beginPath();
     ctx.arc(aiTargetX, aiTargetY, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -2944,7 +2944,7 @@ if (gameMode === 'pve' && aiPath.length > 0) {
     ctx.fill();
     
     ctx.restore();
-}
+}*/
             ctx.restore();
 
             // Draw minimap below both viewports
@@ -3287,3 +3287,4 @@ document.getElementById('ai-difficulty-slider').addEventListener('input', functi
 
 
        
+
