@@ -2898,7 +2898,7 @@ function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
 
             drawPlayer(player1);
             drawPlayer(player2);
-            if (gameMode === 'pve') {
+            /*if (gameMode === 'pve') {
     // Draw AI target and path
     ctx.save();
     ctx.strokeStyle = '#ff0000';
@@ -2908,7 +2908,7 @@ function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
     ctx.lineTo(aiTargetX, aiTargetY);
     ctx.stroke();
     
-   /* ctx.fillStyle = '#ff0000';
+    ctx.fillStyle = '#ff0000';
     ctx.beginPath();
     ctx.arc(aiTargetX, aiTargetY, 5, 0, Math.PI * 2);
     ctx.fill();
@@ -3287,4 +3287,5 @@ document.getElementById('ai-difficulty-slider').addEventListener('input', functi
 
 
        
+
 
