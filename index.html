@@ -1,0 +1,3289 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cool King Game</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Figtree">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #111;
+            color: #fff;
+            font-family: "Figtree", sans-serif;
+        }
+        #game {
+            border: 2px solid #000;
+            background-color: #222;
+            box-shadow: 0 0 30px rgba(255, 215, 0, 0.7);
+            margin: 20px;
+        }
+        
+       
+        #start-screen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        #skin-rules {
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .skin-button {
+            margin: 5px;
+            padding: 10px;
+            background-color: #444;
+            border: 2px solid #ffd700;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .skin-button:hover {
+            background-color: #666;
+        }
+        #countdown {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: #ffd700;
+            display: none;
+        }
+        #win-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: #ffd700;
+            display: none;
+        }
+        #restart-button {
+            position: absolute;
+            top: 60%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            padding: 10px 20px;
+            background-color: #444;
+            border: 2px solid #ffd700;
+            color: #fff;
+            cursor: pointer;
+            border-radius: 5px;
+            display: none;
+        }
+        #restart-button:hover {
+            background-color: #666;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 14px;
+        }
+        #game-mode {
+    margin: 15px 0;
+}
+
+.mode-button {
+    margin: 5px;
+    padding: 10px;
+    background-color: #444;
+    border: 2px solid #ffd700;
+    color: #fff;
+    cursor: pointer;
+    border-radius: 5px;
+}
+
+.mode-button:hover {
+    background-color: #666;
+}
+
+.mode-button.selected {
+    background-color: #ffd700;
+    color: #000;
+}
+#ai-difficulty {
+    color: white;
+    margin: 15px 0;
+}
+
+#ai-difficulty-slider {
+    width: 200px;
+    margin: 0 10px;
+}
+
+#ai-difficulty-value {
+    display: inline-block;
+    width: 80px;
+    text-align: center;
+}
+* {
+    font-family: "Figtree";
+}
+    </style>
+</head>
+<body>
+    <div id="game">
+        <canvas id="canvas" width="700" height="425"></canvas>
+        <div id="start-screen">
+            <div id="ai-difficulty" style="display: none; margin: 15px 0;">
+                <label for="ai-difficulty-slider">AI Difficulty:</label>
+                <input type="range" id="ai-difficulty-slider" min="1" max="10" value="5">
+                <span id="ai-difficulty-value">Medium</span>
+            </div>
+            <div id="game-mode">
+                <button id="pvp-mode" class="mode-button">Player vs Player</button>
+                <button id="pve-mode" class="mode-button">Player vs AI</button>
+            </div>
+            <div id="skin-rules">
+                Each player selects a skin with unique stats and appearance:<br>
+                - Speedy: 1.25x movement speed<br>
+                - Tough: Immune to speed boosts and mud, larger size<br>
+                - Tiny: Smaller size faster speed<br>
+                - Zoomer: Teleports forward with a trail (10s cooldown, stops at obstacles)<br>
+                - Heavy: Slower but larger, chance to stun opponent when they hit you<br>
+                - Sprinter: Slightly faster, can sprint for a burst of speed (10s cooldown)<br>
+                - Ghost: Becomes intangible to pass through obstacles (15s cooldown)<br>
+                - Bouncer: Pushes opponent away on contact (8s cooldown)<br>
+                - Warrior: When tagging opponent, opponent is stunned for 2 seconds<br>
+                - Shield: Blocks tags temporarily (15s cooldown)<br>
+                P1 selects first, then P2.
+            </div>
+            <div id="skin-selection"></div>
+        </div>
+        <div id="countdown">3</div>
+        <div id="win-message"></div>
+        <button id="restart-button">Restart</button>
+        <div id="info"></div>
+    </div>
+    <script>
+        let gameMode = 'pvp'; // 'pvp' or 'pve'
+let aiTargetX = 0;
+let aiTargetY = 0;
+let aiDecisionTimer = 0;
+var AI_DECISION_INTERVAL = 0.5;
+let aiNavigationGrid = null;
+let aiPath = [];
+let aiCurrentWaypointIndex = 0;
+let aiReplanTimer = 0;
+let aiLastSkinName = null;
+const CHASE_PATH_COMMIT_TIME = 1.0;
+const AI_REPLAN_INTERVAL = 1.0;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('start-screen');
+        const countdownEl = document.getElementById('countdown');
+        const winMessage = document.getElementById('win-message');
+        const restartButton = document.getElementById('restart-button');
+        const info = document.getElementById('info');
+        const skinSelection = document.getElementById('skin-selection');
+        let aiDifficulty = 5; // 1-10 scale
+let aiDifficultyLevels = {
+    1: { decisionInterval: 0.6, speedMultiplier: 0.6, abilityChance: 0.05, name: "Very Easy" },
+    2: { decisionInterval: 0.55, speedMultiplier: 0.7, abilityChance: 0.10, name: "Easy" },
+    3: { decisionInterval: 0.5, speedMultiplier: 0.8, abilityChance: 0.15, name: "Below Average" },
+    4: { decisionInterval: 0.45, speedMultiplier: 0.9, abilityChance: 0.20, name: "Average" },
+    5: { decisionInterval: 0.4, speedMultiplier: 1.0, abilityChance: 0.25, name: "Medium" },
+    6: { decisionInterval: 0.35, speedMultiplier: 1.1, abilityChance: 0.30, name: "Above Average" },
+    7: { decisionInterval: 0.3, speedMultiplier: 1.15, abilityChance: 0.35, name: "Hard" },
+    8: { decisionInterval: 0.2, speedMultiplier: 1.2, abilityChance: 0.40, name: "Very Hard" },
+    9: { decisionInterval: 0.15, speedMultiplier: 1.25, abilityChance: 0.45, name: "Expert" },
+    10: { decisionInterval: 0.1, speedMultiplier: 1.3, abilityChance: 0.5, name: "Nightmare" }
+};
+let aiLastPositionX = 0;
+let aiLastPositionY = 0;
+let aiStuckFrames = 0;
+const AI_STUCK_THRESHOLD = 30;
+function checkIfAIStuck() {
+    const movedDistance = Math.hypot(player2.x - aiLastPositionX, player2.y - aiLastPositionY);
+    
+    // More sensitive stuck detection for complex maps
+    const isComplexMap = currentMap.name === 'Crossroads' || currentMap.name === 'Tunnels';
+    const stuckThreshold = isComplexMap ? 20 : 30; // frames
+    
+    if (movedDistance < 2) {
+        aiStuckFrames++;
+    } else {
+        aiStuckFrames = 0;
+    }
+    
+    aiLastPositionX = player2.x;
+    aiLastPositionY = player2.y;
+    
+    return aiStuckFrames > stuckThreshold;
+}
+function initializeNavigationGrid() {
+    // Get current character size from the actual skin
+    const characterRadius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+    const gridSize = 25; // Keep your original grid size
+    
+    const cols = Math.ceil(MAP_WIDTH / gridSize);
+    const rows = Math.ceil(MAP_HEIGHT / gridSize);
+    
+    aiNavigationGrid = {
+        gridSize: gridSize,
+        cols: cols,
+        rows: rows,
+        characterRadius: characterRadius, // Store the current character radius
+        cells: []
+    };
+    
+    // Initialize all cells as walkable
+    for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+            const cellX = x * gridSize + gridSize / 2;
+            const cellY = y * gridSize + gridSize / 2;
+            aiNavigationGrid.cells.push({
+                x: cellX,
+                y: cellY,
+                walkable: true,
+                cost: 1
+            });
+        }
+    }
+    
+    // Mark obstacles as unwalkable with CURRENT character radius consideration
+    for (let obs of currentMap.obstacles) {
+        markObstacleInGrid(obs, gridSize, characterRadius);
+    }
+}
+
+function markObstacleInGrid(obstacle, gridSize, characterRadius) {
+    // Add a small safety buffer for different character sizes
+    const safetyBuffer = 10; // Increased safety buffer for more robust obstacle avoidance globally
+    
+    // Expand obstacle by the CURRENT character radius plus safety buffer
+    const expandedObs = {
+        x: obstacle.x - characterRadius - safetyBuffer,
+        y: obstacle.y - characterRadius - safetyBuffer,
+        w: obstacle.w + (characterRadius + safetyBuffer) * 2,
+        h: obstacle.h + (characterRadius + safetyBuffer) * 2
+    };
+    
+    const startX = Math.floor(expandedObs.x / gridSize);
+    const endX = Math.ceil((expandedObs.x + expandedObs.w) / gridSize);
+    const startY = Math.floor(expandedObs.y / gridSize);
+    const endY = Math.ceil((expandedObs.y + expandedObs.h) / gridSize);
+    
+    for (let y = Math.max(0, startY); y < Math.min(aiNavigationGrid.rows, endY); y++) {
+        for (let x = Math.max(0, startX); x < Math.min(aiNavigationGrid.cols, endX); x++) {
+            const index = y * aiNavigationGrid.cols + x;
+            if (index >= 0 && index < aiNavigationGrid.cells.length) {
+                aiNavigationGrid.cells[index].walkable = false;
+                aiNavigationGrid.cells[index].cost = Infinity;
+            }
+        }
+    }
+}
+function smoothPath(originalPath, characterRadius) {
+    // Safety check for empty or invalid paths
+    if (!originalPath || originalPath.length === 0) {
+        return [];
+    }
+    if (originalPath.length <= 2) return originalPath;
+    
+    const smoothedPath = [originalPath[0]];
+    const safetyMargin = characterRadius * 0.8; // More conservative safety margin
+    
+    for (let i = 1; i < originalPath.length - 1; i++) {
+        const prevPoint = smoothedPath[smoothedPath.length - 1];
+        const currentPoint = originalPath[i];
+        const nextPoint = originalPath[i + 1];
+        
+        // For Tunnels map, be MUCH more conservative about path smoothing
+        if (currentMap.name === 'Tunnels') {
+            // Don't skip any waypoints in tunnels - too risky
+            smoothedPath.push(currentPoint);
+            continue;
+        }
+        
+        // For large characters, be more conservative about skipping points
+        if (characterRadius > BASE_PLAYER_RADIUS * 1.2) {
+            // Large character - don't skip points as aggressively
+            smoothedPath.push(currentPoint);
+        } else {
+            // Check if we can skip this point with safety margin
+            if (!isPathBlockedByAnyObstacle(
+                prevPoint.x, prevPoint.y, 
+                nextPoint.x, nextPoint.y, 
+                characterRadius + safetyMargin
+            )) {
+                // Skip this point, the path is clear
+                continue;
+            } else {
+                // Keep this point, it's necessary for navigation
+                smoothedPath.push(currentPoint);
+            }
+        }
+    }
+    
+    smoothedPath.push(originalPath[originalPath.length - 1]);
+    return smoothedPath;
+}
+
+function isPathBlockedByAnyObstacle(x1, y1, x2, y2, radius) {
+    for (let obs of currentMap.obstacles) {
+        if (isLineBlockedByObstacle(x1, y1, x2, y2, obs, radius)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A* Pathfinding Algorithm
+function findPathAStar(startX, startY, targetX, targetY) {
+    const gridSize = aiNavigationGrid.gridSize;
+    const characterRadius = aiNavigationGrid.characterRadius;
+    const startCellX = Math.floor(startX / gridSize);
+    const startCellY = Math.floor(startY / gridSize);
+    const targetCellX = Math.floor(targetX / gridSize);
+    const targetCellY = Math.floor(targetY / gridSize);
+    
+    const startIndex = startCellY * aiNavigationGrid.cols + startCellX;
+    const targetIndex = targetCellY * aiNavigationGrid.cols + targetCellX;
+    
+    if (startIndex < 0 || startIndex >= aiNavigationGrid.cells.length ||
+        targetIndex < 0 || targetIndex >= aiNavigationGrid.cells.length) {
+        return [];
+    }
+    
+    // A* implementation
+    const openSet = [startIndex];
+    const cameFrom = {};
+    const gScore = {};
+    const fScore = {};
+    let path = []; // Initialize path here
+    
+    // Initialize scores
+    for (let i = 0; i < aiNavigationGrid.cells.length; i++) {
+        gScore[i] = Infinity;
+        fScore[i] = Infinity;
+    }
+    
+    gScore[startIndex] = 0;
+    fScore[startIndex] = heuristic(startCellX, startCellY, targetCellX, targetCellY);
+    
+    while (openSet.length > 0) {
+        // Get node with lowest fScore
+        let currentIndex = openSet[0];
+        for (let i = 1; i < openSet.length; i++) {
+            if (fScore[openSet[i]] < fScore[currentIndex]) {
+                currentIndex = openSet[i];
+            }
+        }
+        
+        if (currentIndex === targetIndex) {
+        // FIX: Define the path variable here
+        path = reconstructPath(cameFrom, currentIndex);
+        
+        return path;
+    }
+        
+        openSet.splice(openSet.indexOf(currentIndex), 1);
+        
+        // Check neighbors
+        const neighbors = getNeighbors(currentIndex);
+        for (const neighborIndex of neighbors) {
+            if (!aiNavigationGrid.cells[neighborIndex].walkable) continue;
+            
+            const tentativeGScore = gScore[currentIndex] + aiNavigationGrid.cells[neighborIndex].cost;
+            
+            if (tentativeGScore < gScore[neighborIndex]) {
+                cameFrom[neighborIndex] = currentIndex;
+                gScore[neighborIndex] = tentativeGScore;
+                fScore[neighborIndex] = gScore[neighborIndex] + 
+                    heuristic(
+                        neighborIndex % aiNavigationGrid.cols,
+                        Math.floor(neighborIndex / aiNavigationGrid.cols),
+                        targetCellX,
+                        targetCellY
+                    );
+                
+                if (!openSet.includes(neighborIndex)) {
+                    openSet.push(neighborIndex);
+                }
+            }
+        }
+    }
+    if (path.length > 0) {
+        // Smooth the path to avoid sharp corners
+        return smoothPath(path, characterRadius);
+    }
+    return []; // No path found
+}
+
+function heuristic(x1, y1, x2, y2) {
+    return Math.abs(x1 - x2) + Math.abs(y1 - y2); // Manhattan distance
+}
+
+function getNeighbors(index) {
+    const x = index % aiNavigationGrid.cols;
+    const y = Math.floor(index / aiNavigationGrid.cols);
+    const neighbors = [];
+    
+    for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            
+            const newX = x + dx;
+            const newY = y + dy;
+            
+            if (newX >= 0 && newX < aiNavigationGrid.cols &&
+                newY >= 0 && newY < aiNavigationGrid.rows) {
+                neighbors.push(newY * aiNavigationGrid.cols + newX);
+            }
+        }
+    }
+    
+    return neighbors;
+}
+
+function reconstructPath(cameFrom, currentIndex) {
+    const path = [aiNavigationGrid.cells[currentIndex]];
+    
+    // Safety check for valid cameFrom data
+    if (!cameFrom || typeof cameFrom !== 'object') {
+        return path;
+    }
+    
+    while (cameFrom[currentIndex] !== undefined) {
+        currentIndex = cameFrom[currentIndex];
+        // Safety check for valid cell index
+        if (currentIndex >= 0 && currentIndex < aiNavigationGrid.cells.length) {
+            path.unshift(aiNavigationGrid.cells[currentIndex]);
+        } else {
+            break; // Invalid index, break out of loop
+        }
+    }
+    return path;
+}
+
+
+function emergencyUnstuck() {
+    console.log("AI is stuck! Attempting emergency recovery...");
+    
+    // Simple approach: move toward center of map with some randomness
+    aiTargetX = MAP_WIDTH / 2 + (Math.random() * 200 - 100);
+    aiTargetY = MAP_HEIGHT / 2 + (Math.random() * 200 - 100);
+    
+    // Clear any existing path and use direct movement
+    aiPath = [{ x: aiTargetX, y: aiTargetY }];
+    aiCurrentWaypointIndex = 0;
+    aiStuckFrames = 0;
+    
+    // If ghost ability is available, use it to escape
+    if (player2.skin && player2.skin.name === 'Ghost' && player2.ghostCooldown <= 0) {
+        player2.ghostTimer = player2.skin.ghostDuration;
+        player2.ghostCooldown = player2.skin.ghostCooldown;
+    }
+}
+        const MAP_WIDTH = 1000;
+        const MAP_HEIGHT = 500;
+        const VIEW_WIDTH = 350;
+        const VIEW_HEIGHT = 350;
+        const MINI_WIDTH = 150;
+        const MINI_HEIGHT = 75;
+        const BASE_SPEED = 3;
+        const BASE_PLAYER_SIZE = 20;
+        const BASE_PLAYER_RADIUS = BASE_PLAYER_SIZE / 2;
+        const CROWN_SIZE = 20;
+        const BOOST_SIZE = 15;
+        const MUD_SIZE = 50;
+        const MUD_MULTIPLIER = 0.5;
+        const MUD_DEBUFF_DURATION = 1000;
+        const BOOST_DURATION = 5000;
+        const BOOST_MULTIPLIER = 2;
+        const STUN_DURATION = 1000;
+        const WIN_TIME = 30000;
+        const BOOST_SPAWN_INTERVAL = 15000;
+        const ZOOMER_DISTANCE = 100;
+        const SPRINTER_COOLDOWN = 10000;
+        const SPRINTER_DURATION = 3000;
+        const SPRINTER_MULTIPLIER = 1.5;
+        const GHOST_COOLDOWN = 15000;
+        const GHOST_DURATION = 5000;
+        const BOUNCER_COOLDOWN = 8000;
+        const BOUNCER_FORCE = 150;
+        const SHIELD_COOLDOWN = 15000;
+        const SHIELD_DURATION = 5000;
+
+        const maps = [
+            {
+                name: 'Open Field',
+                backgroundColor: '#228B22',
+                obstacles: [],
+                mudPatches: [
+                    new MudPatch(MAP_WIDTH * 0.3, MAP_HEIGHT * 0.3, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.7, MAP_HEIGHT * 0.7, MUD_SIZE)
+                ]
+            },
+            {
+                name: 'Maze',
+                backgroundColor: '#9F8F5E',
+                obstacles: [
+                    {x: 250, y: 100, w: 50, h: 250, c: '#000000'},
+                    {x: 750, y: 150, w: 50, h: 250, c: '#000000'},
+                    {x: 400, y: 200, w: 50, h: 300, c: '#000000'},
+                    {x: 600, y: 0, w: 50, h: 300, c: '#000000'}
+                ],
+                mudPatches: [
+                    new MudPatch(MAP_WIDTH * 0.5, MAP_HEIGHT * 0.5, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.1, MAP_HEIGHT * 0.1, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.7, MAP_HEIGHT * 0.7, MUD_SIZE)
+                ]
+            },
+            {
+                name: 'Crossroads',
+                backgroundColor: '#D3D3D3',
+                obstacles: [
+                    {x: MAP_WIDTH / 2 - 40, y: 50, w: 50, h: MAP_HEIGHT/2-100, c: '#808080'},
+                    {x: MAP_WIDTH / 2 - 40, y: MAP_HEIGHT/2+50, w: 50, h: MAP_HEIGHT/2-100, c: '#808080'},
+                    {x: 120, y: MAP_HEIGHT / 2 - 40, w: MAP_WIDTH/2-220, h: 110, c: '#808080'},
+                    {x: MAP_WIDTH/2+50, y: MAP_HEIGHT / 2 - 40, w: MAP_WIDTH/2-200, h: 110, c: '#808080'},
+                ],
+                mudPatches: [
+                    new MudPatch(MAP_WIDTH * 0.2, MAP_HEIGHT * 0.2, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.8, MAP_HEIGHT * 0.2, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.2, MAP_HEIGHT * 0.8, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.8, MAP_HEIGHT * 0.8, MUD_SIZE)
+                ]
+            },
+            {
+                name: 'Arena',
+                backgroundColor: '#36454F',
+                obstacles: [
+                    {x: MAP_WIDTH / 2 - 100, y: MAP_HEIGHT / 2 - 100, w: 200, h: 50,c: '#123456'},
+                    {x: MAP_WIDTH / 2 - 100, y: MAP_HEIGHT / 2 + 50, w: 200, h: 50,c: '#123456'},
+                ],
+                mudPatches: [
+                    new MudPatch(MAP_WIDTH * 0.3, MAP_HEIGHT * 0.3, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.7, MAP_HEIGHT * 0.7, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.3, MAP_HEIGHT * 0.7, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.7, MAP_HEIGHT * 0.3, MUD_SIZE)
+                ]
+            },
+            {
+                name: 'Tunnels',
+                backgroundColor: '#FFFFFF',
+                obstacles: [
+                    {x: 250, y: 30, w: 50, h: 100,c: '#90ee90'},
+                    {x: 50, y: 125, w: 150, h: 50,c: '#90ee90'},
+                    {x: 0, y: 275, w:200, h: 30,c: '#90ee90'},
+                    {x: 250, y: 250, w: 50, h: 200,c: '#90ee90'},
+                    {x: 500, y: 40, w: 50, h: 140,c: '#90ee90'},
+                    {x: 750, y: 250, w: 50, h: 200,c: '#90ee90'},
+                    {x: 400, y: 375, w: 250, h: 50,c: '#90ee90'},
+                    {x: 850, y: 300, w: 100, h: 50,c: '#90ee90'},
+                    {x: 600, y: 125, w: 100, h: 50,c: '#90ee90'},
+                ],
+                mudPatches: [
+                    new MudPatch(MAP_WIDTH * 0.4, MAP_HEIGHT * 0.4, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.8, MAP_HEIGHT * 0.2, MUD_SIZE),
+                    new MudPatch(MAP_WIDTH * 0.1, MAP_HEIGHT * 0.9, MUD_SIZE)
+                ]
+            }
+        ];
+
+        const skins = {
+            speedy: {
+                name: 'Speedy',
+                speed: BASE_SPEED * 1.25,
+                size: BASE_PLAYER_SIZE,
+                color: '#ff0000',
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x - this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x + this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x, player.y + this.size);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            tough: {
+                name: 'Tough',
+                speed: BASE_SPEED,
+                size: BASE_PLAYER_SIZE * 1.1,
+                color: '#808080',
+                immune: true,
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : this.color;
+                    ctx.fillRect(player.x - this.size/2, player.y - this.size/2, this.size, this.size);
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            tiny: {
+                name: 'Tiny',
+                speed: BASE_SPEED*1.15,
+                size: BASE_PLAYER_SIZE * 0.5,
+                color: '#00ff00',
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y - this.size/4, this.size/4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            zoomer: {
+                name: 'Zoomer',
+                speed: BASE_SPEED,
+                size: BASE_PLAYER_SIZE,
+                color: '#00b7eb',
+                zoomCooldown: 5000,
+                teleportTrail: [],
+                draw: function(ctx, player) {
+                    for (let i = 0; i < player.teleportTrail.length; i++) {
+                        const point = player.teleportTrail[i];
+                        ctx.globalAlpha = (1 - i / player.teleportTrail.length) * 0.5;
+                        ctx.fillStyle = this.color;
+                        ctx.beginPath();
+                        ctx.arc(point.x, point.y, this.size / 2, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                    ctx.globalAlpha = 1.0;
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x - this.size/2, player.y);
+                    ctx.lineTo(player.x + this.size/2, player.y);
+                    ctx.lineTo(player.x, player.y - this.size);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            heavy: {
+                name: 'Heavy',
+                speed: BASE_SPEED * 0.95,
+                size: BASE_PLAYER_SIZE * 1.1,
+                color: '#4b0082',
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.fillRect(player.x - this.size/2, player.y - this.size/2, this.size, this.size);
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            sprinter: {
+                name: 'Sprinter',
+                speed: BASE_SPEED * 1.1,
+                size: BASE_PLAYER_SIZE,
+                color: '#ffa500',
+                sprintTimer: 0,
+                sprintDuration: 3000,
+                sprintCooldown: 10000,
+                sprintMultiplier: 1.5,
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.sprintTimer > 0 ? '#ff4500' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x - this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x + this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x, player.y - this.size);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            ghost: {
+                name: 'Ghost',
+                speed: BASE_SPEED,
+                size: BASE_PLAYER_SIZE,
+                color: '#ffffff',
+                ghostTimer: 0,
+                ghostCooldown: 15000,
+                ghostDuration: 5000,
+                draw: function(ctx, player) {
+                    ctx.globalAlpha = player.ghostTimer > 0 ? 0.5 : 1.0;
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y - this.size/4, this.size/4, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1.0;
+                }
+            },
+            bouncer: {
+                name: 'Bouncer',
+                speed: BASE_SPEED,
+                size: BASE_PLAYER_SIZE,
+                color: '#ff69b4',
+                bounceTimer: 0,
+                bounceCooldown: 8000,
+                bounceForce: 150,
+                bounceDuration: 3000,
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x - this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x + this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x, player.y - this.size/2);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            warrior: {
+                name: 'Warrior',
+                speed: BASE_SPEED,
+                size: BASE_PLAYER_SIZE,
+                stunMultiplier: 2,
+                color: '#c0c0c0',
+                draw: function(ctx, player) {
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.beginPath();
+                    ctx.moveTo(player.x - this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x + this.size/2, player.y + this.size/2);
+                    ctx.lineTo(player.x, player.y - this.size/2);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            },
+            shield: {
+                name: 'Shield',
+                speed: BASE_SPEED * 0.9,
+                size: BASE_PLAYER_SIZE * 1.1,
+                color: '#c0c0c0',
+                shieldTimer: 0,
+                shieldDuration: 5000,
+                shieldCooldown: 15000,
+                draw: function(ctx, player) {
+                    if (player.shieldTimer > 0 && !player.stunned) {
+                        ctx.strokeStyle = '#ffd700';
+                    } else {
+                        ctx.strokeStyle='#CBC3E3';
+                    }
+                        ctx.lineWidth = 3;
+                        ctx.beginPath();
+                        ctx.arc(player.x, player.y, this.size/2 + 5, 0, Math.PI * 2);
+                        ctx.stroke();
+                    ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : this.color;
+                    ctx.fillRect(player.x - this.size/2, player.y - this.size/2, this.size, this.size);
+                    ctx.fillStyle = player.stunned ? '#a9a9a9' : '#ffdab9';
+                    ctx.beginPath();
+                    ctx.arc(player.x, player.y, this.size/3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        };
+
+        let player1 = {
+            x: 100,
+            y: MAP_HEIGHT / 2,
+            dx: 0,
+            dy: 0,
+            hasCrown: false,
+            holdTime: 0,
+            stunned: false,
+            stunTimer: 0,
+            boostTimer: 0,
+            boostMultiplier: 1,
+            mudTimer: 0,
+            inMud: false,
+            skin: null,
+            zoomCooldown: 0,
+            sprintTimer: 0,
+            sprintCooldown: 0,
+            ghostTimer: 0,
+            ghostCooldown: 0,
+            bounceTimer: 0,
+            shieldTimer: 0,
+            shieldCooldown: 0,
+            bounceCooldown: 0,
+            teleportTrail: [],
+            color: '#ff0000'
+        };
+
+        let player2 = {
+            x: MAP_WIDTH - 100,
+            y: MAP_HEIGHT / 2,
+            dx: 0,
+            dy: 0,
+            hasCrown: false,
+            holdTime: 0,
+            stunned: false,
+            stunTimer: 0,
+            boostTimer: 0,
+            boostMultiplier: 1,
+            mudTimer: 0,
+            inMud: false,
+            skin: null,
+            zoomCooldown: 0,
+            sprintTimer: 0,
+            sprintCooldown: 0,
+            ghostTimer: 0,
+            ghostCooldown: 0,
+            bounceTimer: 0,
+            shieldTimer: 0,
+            shieldCooldown: 0,
+            bounceCooldown: 0,
+            teleportTrail: [],
+            prevX: MAP_WIDTH - 100,
+    prevY: MAP_HEIGHT / 2,
+            color: '#0000ff'
+        };
+
+        let crown = {x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2, picked: false};
+        let speedBoosts = [];
+        let boostSpawnTimer = 0;
+        let usedSkins = [];
+        let currentMap = null;
+        let gameState = 'start';
+        let countdown = 3;
+        let countdownTimer = 1000;
+        const countdownInterval = 1000;
+        const keys = {};
+
+        function drawBackground() {
+            ctx.fillStyle = currentMap.backgroundColor;
+            ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+        }
+        
+function getMapSpecificTarget() {
+    const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+    
+    /*if (currentMap.name === 'Crossroads') {
+        return handleCrossroadsNavigation(radius);
+    }
+    else if (currentMap.name === 'Tunnels') {
+        return handleTunnelsNavigation(radius);
+    }*/
+    
+    // Default behavior for other maps
+    return getDefaultTarget();
+}
+function checkIfNearVerticalObstacle(x, y, radius) {
+    if (currentMap.name !== 'Crossroads') return false;
+    
+    const verticalObstacles = [
+        { x: MAP_WIDTH / 2 - 40, y: 50, w: 50, h: MAP_HEIGHT/2-100 },
+        { x: MAP_WIDTH / 2 - 40, y: MAP_HEIGHT/2+50, w: 50, h: MAP_HEIGHT/2-100 }
+    ];
+    
+    for (const obs of verticalObstacles) {
+        const nearLeftSide = x >= obs.x - radius - 20 && x <= obs.x + 10;
+        const nearRightSide = x >= obs.x + obs.w - 10 && x <= obs.x + obs.w + radius + 20;
+        const withinHeightRange = y >= obs.y - 30 && y <= obs.y + obs.h + 30;
+        
+        if ((nearLeftSide || nearRightSide) && withinHeightRange) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+function handleCrossroadsNavigation(radius) {
+    const centerX = MAP_WIDTH / 2;
+    const centerY = MAP_HEIGHT / 2;
+    
+    if (player2.hasCrown) {
+        // AI has crown: smart evasion - avoid corners and seek open areas
+        const avoidanceAngle = Math.atan2(player2.y - player1.y, player2.x - player1.x);
+        const evasionDistance = 250;
+        const distanceToPlayer = Math.hypot(player2.x - player1.x, player2.y - player1.y);
+        
+        // SPECIAL HANDLING FOR CROSSROADS VERTICAL OBSTACLES
+        const isNearVerticalObstacle = checkIfNearVerticalObstacle(player2.x, player2.y, radius);
+        
+        if (isNearVerticalObstacle) {
+            // When near vertical obstacles, go up and around or down and around
+            const verticalObstacle = currentMap.obstacles[0];
+            const isLeftOfObstacle = player2.x < verticalObstacle.x + verticalObstacle.w / 2;
+            
+            if (player2.y < MAP_HEIGHT / 2) {
+                // Go up and around
+                targetX = isLeftOfObstacle ? verticalObstacle.x - 60 : verticalObstacle.x + verticalObstacle.w + 60;
+                targetY = 50;
+            } else {
+                // Go down and around
+                targetX = isLeftOfObstacle ? verticalObstacle.x - 60 : verticalObstacle.x + verticalObstacle.w + 60;
+                targetY = MAP_HEIGHT - 50;
+            }
+        }
+        // If player is very close, prioritize immediate escape around obstacles
+        else if (distanceToPlayer < 100) {
+            // Emergency escape - find the nearest open pathway around obstacles
+            const escapeDirections = [
+                { angle: avoidanceAngle + Math.PI, distance: evasionDistance },
+                { angle: avoidanceAngle + Math.PI - Math.PI/4, distance: evasionDistance },
+                { angle: avoidanceAngle + Math.PI + Math.PI/4, distance: evasionDistance },
+                { angle: avoidanceAngle + Math.PI/2, distance: evasionDistance * 0.7 },
+                { angle: avoidanceAngle - Math.PI/2, distance: evasionDistance * 0.7 }
+            ];
+            
+            let bestEscape = null;
+            let bestScore = -Infinity;
+            
+            for (const direction of escapeDirections) {
+                const testX = player2.x + Math.cos(direction.angle) * direction.distance;
+                const testY = player2.y + Math.sin(direction.angle) * direction.distance;
+                
+                const pathClear = !isPathBlocked(player2.x, player2.y, testX, testY, radius);
+                const playerDistance = Math.hypot(testX - player1.x, testY - player1.y);
+                const cornerPenalty = getCornerPenalty(testX, testY);
+                
+                const score = (pathClear ? 100 : 0) + playerDistance - cornerPenalty;
+                
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestEscape = { x: testX, y: testY };
+                }
+            }
+            
+            targetX = bestEscape ? bestEscape.x : player2.x + Math.cos(avoidanceAngle + Math.PI) * evasionDistance;
+            targetY = bestEscape ? bestEscape.y : player2.y + Math.sin(avoidanceAngle + Math.PI) * evasionDistance;
+        } else {
+            // Calculate multiple escape directions, avoiding corners
+            const escapeOptions = [];
+            for (let angleOffset of [-Math.PI/3, -Math.PI/6, 0, Math.PI/6, Math.PI/3]) {
+                const testAngle = avoidanceAngle + angleOffset;
+                let testX = player2.x + Math.cos(testAngle) * evasionDistance;
+                let testY = player2.y + Math.sin(testAngle) * evasionDistance;
+                
+                const cornerPenalty = getCornerPenalty(testX, testY);
+                const centerDistance = Math.hypot(testX - MAP_WIDTH/2, testY - MAP_HEIGHT/2);
+                
+                escapeOptions.push({
+                    x: testX,
+                    y: testY,
+                    angle: testAngle,
+                    score: -cornerPenalty + (300 - centerDistance) / 10
+                });
+            }
+            
+            escapeOptions.sort((a, b) => b.score - a.score);
+            targetX = escapeOptions[0].x;
+            targetY = escapeOptions[0].y;
+        }
+
+        // Consider multiple evasion directions to find the least blocked path
+        const evasionDirections = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI];
+        let bestEvasionTarget = { x: targetX, y: targetY };
+        let minObstacleDistance = Infinity;
+
+        for (const angleOffset of evasionDirections) {
+            const testAngle = avoidanceAngle + angleOffset;
+            const testX = player2.x + Math.cos(testAngle) * evasionDistance;
+            const testY = player2.y + Math.sin(testAngle) * evasionDistance;
+
+            let blocked = false;
+            let closestObstacleDist = Infinity;
+            for (const obs of currentMap.obstacles) {
+                if (isLineBlockedByObstacle(player2.x, player2.y, testX, testY, obs, radius)) {
+                    blocked = true;
+                    break;
+                }
+                const distToObsCenter = Math.hypot(testX - (obs.x + obs.w/2), testY - (obs.y + obs.h/2));
+                if (distToObsCenter < closestObstacleDist) {
+                    closestObstacleDist = distToObsCenter;
+                }
+            }
+
+            if (!blocked && closestObstacleDist > 100) {
+                bestEvasionTarget = { x: testX, y: testY };
+                minObstacleDistance = closestObstacleDist;
+                break;
+            } else if (!blocked && closestObstacleDist < minObstacleDistance) {
+                bestEvasionTarget = { x: testX, y: testY };
+                minObstacleDistance = closestObstacleDist;
+            }
+        }
+
+        targetX = bestEvasionTarget.x;
+        targetY = bestEvasionTarget.y;
+        
+        // Ensure we don't go to corners
+        const safeMargin = 120;
+        targetX = Math.max(safeMargin, Math.min(MAP_WIDTH - safeMargin, targetX));
+        targetY = Math.max(safeMargin, Math.min(MAP_HEIGHT - safeMargin, targetY));
+
+        // Validate and fix the final target
+        const validatedTarget = validateEscapeTarget(player2.x, player2.y, targetX, targetY, radius);
+        return validatedTarget;
+    }
+    else if (player1.hasCrown) {
+    // If player is very close, charge directly at them
+    const distanceToPlayer = Math.hypot(player2.x - player1.x, player2.y - player1.y);
+    const closeDistanceThreshold = 200;
+    
+    if (distanceToPlayer < closeDistanceThreshold) {
+        return { x: player1.x, y: player1.y };
+    } else {
+        // Player has crown: AI will attempt to predict player1's movement
+        const predictionTime = 0.3;
+        let predictedPlayerX = player1.x + (player1.dx || 0) * predictionTime * 60;
+        let predictedPlayerY = player1.y + (player1.dy || 0) * predictionTime * 60;
+
+        predictedPlayerX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, predictedPlayerX));
+        predictedPlayerY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, predictedPlayerY));
+        
+        return { x: predictedPlayerX, y: predictedPlayerY };
+    }
+}
+    else if (!crown.picked) {
+        // Go for crown, but use smart pathfinding for Crossroads
+        if (isPathBlocked(player2.x, player2.y, crown.x, crown.y, radius)) {
+            const aiQuadrant = getQuadrant(player2.x, player2.y);
+            const crownQuadrant = getQuadrant(crown.x, crown.y);
+            
+            if (aiQuadrant !== crownQuadrant) {
+                return getCrossroadsWaypoint(player2.x, player2.y, crown.x, crown.y, radius);
+            }
+        }
+        
+        return { x: crown.x, y: crown.y };
+    }
+    
+}
+function updateAIMovement(dt) {
+    if (gameMode !== 'pve' || player2.stunned || !player2.skin) return;
+    
+    const difficulty = aiDifficultyLevels[aiDifficulty];
+    const characterRadius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+    
+    aiDecisionTimer -= dt;
+    aiReplanTimer -= dt;
+    
+    const isRammingObstacle = isAITouchingObstacle() && 
+                             Math.abs(player2.dx) > 0.1 && 
+                             Math.abs(player2.dy) > 0.1 &&
+                             aiReplanTimer > AI_REPLAN_INTERVAL * 0.7;
+    
+    if (aiDecisionTimer <= 0 || checkIfAIStuck() || isRammingObstacle) {
+        makeAIDecision();
+        aiDecisionTimer = difficulty.decisionInterval;
+        aiReplanTimer = AI_REPLAN_INTERVAL;
+    }
+    
+    // Follow the current path
+    if (aiPath.length > 0 && aiCurrentWaypointIndex < aiPath.length) {
+        const currentWaypoint = aiPath[aiCurrentWaypointIndex];
+        const distToWaypoint = Math.hypot(player2.x - currentWaypoint.x, player2.y - currentWaypoint.y);
+        
+        if (distToWaypoint < 35) { // Slightly larger threshold for waypoints
+            aiCurrentWaypointIndex++;
+            if (aiCurrentWaypointIndex < aiPath.length) {
+                aiTargetX = aiPath[aiCurrentWaypointIndex].x;
+                aiTargetY = aiPath[aiCurrentWaypointIndex].y;
+            }
+        } else {
+            aiTargetX = currentWaypoint.x;
+            aiTargetY = currentWaypoint.y;
+        }
+    }
+    
+    // Move toward current target - NO WALL SLIDING FOR AI
+    const dx = aiTargetX - player2.x;
+    const dy = aiTargetY - player2.y;
+    const dist = Math.hypot(dx, dy);
+    
+    if (dist > 5) {
+        const baseSpeed = getCurrentSpeed(player2);
+        const speed = baseSpeed * difficulty.speedMultiplier;
+        
+        // Calculate individual speeds for x and y components
+        let speedX = 0;
+        let speedY = 0;
+        if (Math.abs(dx) > 0) {
+            speedX = (dx / Math.abs(dx)) * speed; // Full speed in X direction
+        }
+        if (Math.abs(dy) > 0) {
+            speedY = (dy / Math.abs(dy)) * speed; // Full speed in Y direction
+        }
+
+            player2.dx = speedX
+            player2.dy = speedY
+        // If path is blocked, the AI will replan in the next decision cycle
+    } else {
+        player2.dx = 0;
+        player2.dy = 0;
+    }
+    
+    if (Math.random() < difficulty.abilityChance) {
+        useAISmartAbility();
+    }
+}
+function getClearPathAroundVerticalObstacle(playerX, playerY, obstacle, radius) {
+    const isLeftOfObstacle = playerX < obstacle.x + obstacle.w / 2;
+    
+    if (isLeftOfObstacle) {
+        // Left side - go around from top or bottom
+        if (playerY < MAP_HEIGHT / 2) {
+            // Go up and around
+            return [
+                { x: obstacle.x - 60, y: 50 }, // Top left of obstacle
+                { x: obstacle.x + obstacle.w + 60, y: 50 } // Top right of obstacle
+            ];
+        } else {
+            // Go down and around
+            return [
+                { x: obstacle.x - 60, y: MAP_HEIGHT - 50 }, // Bottom left of obstacle
+                { x: obstacle.x + obstacle.w + 60, y: MAP_HEIGHT - 50 } // Bottom right of obstacle
+            ];
+        }
+    } else {
+        // Right side - go around from top or bottom
+        if (playerY < MAP_HEIGHT / 2) {
+            // Go up and around
+            return [
+                { x: obstacle.x + obstacle.w + 60, y: 50 }, // Top right of obstacle
+                { x: obstacle.x - 60, y: 50 } // Top left of obstacle
+            ];
+        } else {
+            // Go down and around
+            return [
+                { x: obstacle.x + obstacle.w + 60, y: MAP_HEIGHT - 50 }, // Bottom right of obstacle
+                { x: obstacle.x - 60, y: MAP_HEIGHT - 50 } // Bottom left of obstacle
+            ];
+        }
+    }
+}
+function validateEscapeTarget(startX, startY, targetX, targetY, radius) {
+    // Check if the direct path to target is blocked
+    if (isPathBlocked(startX, startY, targetX, targetY, radius)) {
+        // Find alternative safe positions around the target
+        const alternatives = [];
+        const searchRadius = 80;
+        
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+            const altX = targetX + Math.cos(angle) * searchRadius;
+            const altY = targetY + Math.sin(angle) * searchRadius;
+            
+            // Check bounds
+            if (altX < radius + 20 || altX > MAP_WIDTH - radius - 20 || 
+                altY < radius + 20 || altY > MAP_HEIGHT - radius - 20) continue;
+                
+            // Check if this alternative is reachable and not blocked
+            if (!isPathBlocked(startX, startY, altX, altY, radius) && 
+                !isPositionBlocked(altX, altY, radius)) {
+                alternatives.push({ x: altX, y: altY });
+            }
+        }
+        
+        // Return best alternative or fallback to map center
+        if (alternatives.length > 0) {
+            return alternatives[0];
+        } else {
+            return { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 };
+        }
+    }
+    
+    return { x: targetX, y: targetY };
+}
+function getCornerPenalty(x, y) {
+    const cornerThreshold = 150;
+    const edgeThreshold = 80;
+    
+    let penalty = 0;
+    
+    // Heavy penalty for corners
+    if ((x < cornerThreshold && y < cornerThreshold) ||
+        (x > MAP_WIDTH - cornerThreshold && y < cornerThreshold) ||
+        (x < cornerThreshold && y > MAP_HEIGHT - cornerThreshold) ||
+        (x > MAP_WIDTH - cornerThreshold && y > MAP_HEIGHT - cornerThreshold)) {
+        penalty += 1000; // Very high penalty
+    }
+    
+    // Medium penalty for edges
+    if (x < edgeThreshold || x > MAP_WIDTH - edgeThreshold ||
+        y < edgeThreshold || y > MAP_HEIGHT - edgeThreshold) {
+        penalty += 300;
+    }
+    
+    return penalty;
+}
+// Helper function to determine which quadrant a point is in
+function getQuadrant(x, y) {
+    const centerX = MAP_WIDTH / 2;
+    const centerY = MAP_HEIGHT / 2;
+    
+    if (x < centerX && y < centerY) return 'top-left';
+    if (x >= centerX && y < centerY) return 'top-right';
+    if (x < centerX && y >= centerY) return 'bottom-left';
+    return 'bottom-right';
+}
+
+// Helper function to get waypoint for navigating crossroads
+function getCrossroadsWaypoint(startX, startY, targetX, targetY, radius) {
+    const centerX = MAP_WIDTH / 2;
+    const centerY = MAP_HEIGHT / 2;
+    
+    // Determine the best intermediate waypoint based on current position
+    // Navigate through the cross-shaped corridors
+    
+    if (Math.abs(startX - centerX) > Math.abs(startY - centerY)) {
+        // Horizontal movement is dominant - use horizontal corridor
+        if (startY < centerY) {
+            // Use top horizontal corridor
+            return { x: centerX, y: centerY - 70 };
+        } else {
+            // Use bottom horizontal corridor  
+            return { x: centerX, y: centerY + 70 };
+        }
+    } else {
+        // Vertical movement is dominant - use vertical corridor
+        if (startX < centerX) {
+            // Use left vertical corridor
+            return { x: centerX - 70, y: centerY };
+        } else {
+            // Use right vertical corridor
+            return { x: centerX + 70, y: centerY };
+        }
+    }
+}
+
+function handleTunnelsNavigation(radius) {
+    if (player2.hasCrown) {
+    // Smart tunnel navigation - use corridors to escape, avoid dead ends
+    const avoidanceAngle = Math.atan2(player2.y - player1.y, player2.x - player1.x);
+    const distanceToPlayer = Math.hypot(player2.x - player1.x, player2.y - player1.y);
+    
+    let targetX, targetY;
+    
+    // If player is close, prioritize immediate escape through nearest corridor
+    if (distanceToPlayer < 150) {
+        const corridorTargets = [
+            { x: MAP_WIDTH * 0.15, y: MAP_HEIGHT * 0.3 }, // Left corridor
+            { x: MAP_WIDTH * 0.85, y: MAP_HEIGHT * 0.3 }, // Right corridor  
+            { x: MAP_WIDTH * 0.5, y: MAP_HEIGHT * 0.15 },  // Top corridor
+            { x: MAP_WIDTH * 0.5, y: MAP_HEIGHT * 0.85 }   // Bottom corridor
+        ];
+        
+        // Find the corridor that's furthest from player
+        let bestCorridor = corridorTargets[0];
+        let maxPlayerDistance = 0;
+        
+        for (const corridor of corridorTargets) {
+            const playerDist = Math.hypot(corridor.x - player1.x, corridor.y - player1.y);
+            if (playerDist > maxPlayerDistance) {
+                maxPlayerDistance = playerDist;
+                bestCorridor = corridor;
+            }
+        }
+        
+        targetX = bestCorridor.x;
+        targetY = bestCorridor.y;
+    } else {
+        // Normal evasion when player isn't too close
+        targetX = player2.x + Math.cos(avoidanceAngle) * 200;
+        targetY = player2.y + Math.sin(avoidanceAngle) * 200;
+        
+        // Ensure target is within bounds
+        targetX = Math.max(radius + 30, Math.min(MAP_WIDTH - radius - 30, targetX));
+        targetY = Math.max(radius + 30, Math.min(MAP_HEIGHT - radius - 30, targetY));
+    }
+    
+    // Final safety check - ensure target is valid
+targetX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, targetX));
+targetY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, targetY));
+
+// Validate the path is actually clear for tunnels
+const validatedTarget = validateEscapeTarget(player2.x, player2.y, targetX, targetY, radius);
+return validatedTarget;
+        
+        // Consider multiple directions to find the safest escape route
+        const escapeDirections = [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2];
+        let bestEscapeTarget = { x: targetX, y: targetY };
+        let minObstacleDistance = Infinity;
+
+        for (const angleOffset of escapeDirections) {
+            const testAngle = avoidanceAngle + angleOffset;
+            const testX = player2.x + Math.cos(testAngle) * avoidanceDistance;
+            const testY = player2.y + Math.sin(testAngle) * avoidanceDistance;
+
+            // Check if this test path is blocked
+            let blocked = false;
+            let closestObstacleDist = Infinity;
+            for (const obs of currentMap.obstacles) {
+                if (isLineBlockedByObstacle(player2.x, player2.y, testX, testY, obs, radius)) {
+                    blocked = true;
+                    break;
+                }
+                const distToObsCenter = Math.hypot(testX - (obs.x + obs.w/2), testY - (obs.y + obs.h/2));
+                if (distToObsCenter < closestObstacleDist) {
+                    closestObstacleDist = distToObsCenter;
+                }
+            }
+
+            if (!blocked && closestObstacleDist > 100) { // Prioritize less congested paths
+                bestEscapeTarget = { x: testX, y: testY };
+                minObstacleDistance = closestObstacleDist;
+                break; // Found a good enough escape route
+            } else if (!blocked && closestObstacleDist < minObstacleDistance) {
+                // Keep this as a backup if no perfectly clear path is found
+                bestEscapeTarget = { x: testX, y: testY };
+                minObstacleDistance = closestObstacleDist;
+            }
+        }
+
+        targetX = bestEscapeTarget.x;
+        targetY = bestEscapeTarget.y;
+
+        // Clamp to map boundaries
+        targetX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, targetX));
+        targetY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, targetY));
+        
+        return { x: targetX, y: targetY };
+    }
+    else if (player1.hasCrown) {
+    // If player is very close, charge directly at them
+    const distanceToPlayer = Math.hypot(player2.x - player1.x, player2.y - player1.y);
+    const closeDistanceThreshold = 200; // Distancw AI should charge directly
+    
+    if (distanceToPlayer < closeDistanceThreshold) {
+        // Charge directly at player when very close
+        return { x: player1.x, y: player1.y };
+    } else {
+        // FIXED: Player has crown - AI should CHASE, not avoid!
+        // Use predictive chasing for better AI behavior
+        const predictionTime = 0.5; // Predict 0.5 seconds ahead
+        let predictedPlayerX = player1.x + (player1.dx || 0) * predictionTime * 60; // Assuming 60 FPS
+        let predictedPlayerY = player1.y + (player1.dy || 0) * predictionTime * 60;
+
+        // Clamp predicted position to map boundaries
+        predictedPlayerX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, predictedPlayerX));
+        predictedPlayerY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, predictedPlayerY));
+        
+        // For tunnels, if direct path is blocked, try to get closer to player
+        const directDistance = Math.hypot(predictedPlayerX - player2.x, predictedPlayerY - player2.y);
+        if (directDistance > 100 && isPathBlocked(player2.x, player2.y, predictedPlayerX, predictedPlayerY, radius)) {
+            // Find intermediate position closer to player
+            const angle = Math.atan2(predictedPlayerY - player2.y, predictedPlayerX - player2.x);
+            const stepDistance = 100; // Move 100 pixels closer
+            const intermediateX = player2.x + Math.cos(angle) * stepDistance;
+            const intermediateY = player2.y + Math.sin(angle) * stepDistance;
+            
+            return { 
+                x: Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, intermediateX)), 
+                y: Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, intermediateY)) 
+            };
+        }
+        
+        return { x: predictedPlayerX, y: predictedPlayerY };
+    }
+}
+    else if (!crown.picked) {
+        // Go for crown - let A* handle pathfinding
+        return { x: crown.x, y: crown.y };
+    }
+    
+}
+
+function getDefaultTarget() {
+    // Your original target logic here
+    if (!crown.picked) {
+        return { x: crown.x, y: crown.y };
+    }
+    else if (player2.hasCrown) {
+    // Smart evasion for default maps - avoid corners and edges
+    const playerAngle = Math.atan2(player1.y - player2.y, player1.x - player2.x);
+    const evasionDistance = 300;
+    
+    // Test multiple escape directions
+    const escapeAngles = [
+        playerAngle + Math.PI,           // Direct opposite
+        playerAngle + Math.PI + Math.PI/4,  // Diagonal escapes
+        playerAngle + Math.PI - Math.PI/4,
+        playerAngle + Math.PI + Math.PI/2,
+        playerAngle + Math.PI - Math.PI/2
+    ];
+    
+    let bestTarget = null;
+    let bestScore = -Infinity;
+    
+    for (const angle of escapeAngles) {
+        let testX = player2.x + Math.cos(angle) * evasionDistance;
+        let testY = player2.y + Math.sin(angle) * evasionDistance;
+        
+        // Clamp to safe boundaries (avoid edges)
+        testX = Math.max(100, Math.min(MAP_WIDTH - 100, testX));
+        testY = Math.max(100, Math.min(MAP_HEIGHT - 100, testY));
+        
+        // Score based on distance from corners and player
+        const cornerPenalty = getCornerPenalty(testX, testY);
+        const playerDistance = Math.hypot(testX - player1.x, testY - player1.y);
+        const score = playerDistance - cornerPenalty;
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestTarget = { x: testX, y: testY };
+        }
+    }
+    
+    return bestTarget || { x: MAP_WIDTH/2, y: MAP_HEIGHT/2 };
+}
+    else if (player1.hasCrown&&(speedBoosts.length==0||player2.skin.immune)) { // Removed unnecessary condition for chasing
+        // AI is chasing player1 who has the crown
+        // The AI should aggressively pursue, even to map edges
+        return { x: player1.x, y: player1.y };
+    } else {
+        return {x: findMostValuableBoost().x, y: findMostValuableBoost().y}
+    }
+    
+}
+function findConsistentWayAround(startX, startY, targetX, targetY, obstacle, radius) {
+    // Use a deterministic approach based on positions to avoid flip-flopping
+    const obstacleCenterX = obstacle.x + obstacle.w / 2;
+    const obstacleCenterY = obstacle.y + obstacle.h / 2;
+    
+    // Create a unique identifier for this obstacle-path combination
+    const pathHash = Math.floor((startX + startY + targetX + targetY) / 50);
+    
+    // Determine go-around direction based on hash (consistent for this path)
+    const goRight = (pathHash % 2) === 0;
+    const goOver = (Math.floor(pathHash / 2) % 2) === 0;
+    
+    let waypointX, waypointY;
+    
+    if (Math.abs(targetX - startX) > Math.abs(targetY - startY)) {
+        // Horizontal movement dominant
+        if (goOver) {
+            waypointX = obstacleCenterX;
+            waypointY = obstacle.y - radius - 30;
+        } else {
+            waypointX = obstacleCenterX;
+            waypointY = obstacle.y + obstacle.h + radius + 30;
+        }
+    } else {
+        // Vertical movement dominant
+        if (goRight) {
+            waypointX = obstacle.x - radius - 30;
+            waypointY = obstacleCenterY;
+        } else {
+            waypointX = obstacle.x + obstacle.w + radius + 30;
+            waypointY = obstacleCenterY;
+        }
+    }
+    
+    // Ensure waypoint is within bounds
+    waypointX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, waypointX));
+    waypointY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, waypointY));
+    
+    return { x: waypointX, y: waypointY };
+}
+function isLineBlocked(x1, y1, x2, y2, obstacle, radius) {
+    // Add safety check for undefined obstacle
+    if (!obstacle) return false;
+    
+    // Simple line-rectangle intersection with expanded obstacle
+    const expandedObstacle = {
+        x: obstacle.x - radius,
+        y: obstacle.y - radius,
+        w: obstacle.w + radius * 2,
+        h: obstacle.h + radius * 2
+    };
+    
+    return lineRectIntersection(x1, y1, x2, y2, expandedObstacle);
+}
+function lineRectIntersection(x1, y1, x2, y2, rect) {
+    // Cohen-Sutherland line clipping algorithm
+    if (!rect) return false;
+
+    const INSIDE = 0;
+    const LEFT = 1;
+    const RIGHT = 2;
+    const BOTTOM = 4;
+    const TOP = 8;
+    
+    function computeCode(x, y) {
+        let code = INSIDE;
+        if (x < rect.x) code |= LEFT;
+        else if (x > rect.x + rect.w) code |= RIGHT;
+        if (y < rect.y) code |= BOTTOM;
+        else if (y > rect.y + rect.h) code |= TOP;
+        return code;
+    }
+    
+    let code1 = computeCode(x1, y1);
+    let code2 = computeCode(x2, y2);
+    let accept = false;
+    
+    while (true) {
+        if (!(code1 | code2)) {
+            accept = true;
+            break;
+        } else if (code1 & code2) {
+            break;
+        } else {
+            let codeOut = code1 ? code1 : code2;
+            let x, y;
+            
+            if (codeOut & TOP) {
+                x = x1 + (x2 - x1) * (rect.y + rect.h - y1) / (y2 - y1);
+                y = rect.y + rect.h;
+            } else if (codeOut & BOTTOM) {
+                x = x1 + (x2 - x1) * (rect.y - y1) / (y2 - y1);
+                y = rect.y;
+            } else if (codeOut & RIGHT) {
+                y = y1 + (y2 - y1) * (rect.x + rect.w - x1) / (x2 - x1);
+                x = rect.x + rect.w;
+            } else if (codeOut & LEFT) {
+                y = y1 + (y2 - y1) * (rect.x - x1) / (x2 - x1);
+                x = rect.x;
+            }
+            
+            if (codeOut === code1) {
+                x1 = x;
+                y1 = y;
+                code1 = computeCode(x1, y1);
+            } else {
+                x2 = x;
+                y2 = y;
+                code2 = computeCode(x2, y2);
+            }
+        }
+    }
+    
+    return accept;
+}
+
+function findPathWaypoints(startX, startY, targetX, targetY, radius, depth = 0) {
+    const waypoints = [];
+    const MAX_DEPTH = 3; // Prevent infinite recursion
+    
+    if (depth > MAX_DEPTH) {
+        return [{ x: targetX, y: targetY }]; // Fallback
+    }
+    
+    // Get obstacles between start and target
+    const blockingObstacles = [];
+    
+    for (let obs of currentMap.obstacles) {
+        if (isLineBlockedByObstacle(startX, startY, targetX, targetY, obs, radius)) {
+            blockingObstacles.push(obs);
+        }
+    }
+    
+    if (blockingObstacles.length === 0) {
+        return [{ x: targetX, y: targetY }];
+    }
+    
+    // Sort obstacles by distance to start
+    blockingObstacles.sort((a, b) => {
+        const distA = Math.hypot(startX - (a.x + a.w/2), startY - (a.y + a.h/2));
+        const distB = Math.hypot(startX - (b.x + b.w/2), startY - (b.y + b.h/2));
+        return distA - distB;
+    });
+    
+    // Only handle the first obstacle
+    const closestObs = blockingObstacles[0];
+    const waypoint = createSmartWaypoint(startX, startY, targetX, targetY, closestObs, radius);
+    
+    if (waypoint) {
+        waypoints.push(waypoint);
+        
+        // Check if path from waypoint to target is clear
+        if (!isPathBlocked(waypoint.x, waypoint.y, targetX, targetY, radius)) {
+            waypoints.push({ x: targetX, y: targetY });
+        } else {
+            // Recursively find path from waypoint to target
+            const nextWaypoints = findPathWaypoints(waypoint.x, waypoint.y, targetX, targetY, radius, depth + 1);
+            waypoints.push(...nextWaypoints);
+        }
+    } else {
+        waypoints.push({ x: targetX, y: targetY });
+    }
+    
+    return waypoints;
+}
+function createSmartWaypoint(startX, startY, targetX, targetY, obstacle, radius) {
+    if (!obstacle) return null;
+
+    const obstacleCenterX = obstacle.x + obstacle.w / 2;
+    const obstacleCenterY = obstacle.y + obstacle.h / 2;
+    
+    // For complex maps like Crossroads, use more strategic waypoint selection
+    const isComplexMap = currentMap.name === 'Crossroads' || currentMap.name === 'Tunnels';
+    
+    // Generate candidate waypoints for all four sides with better positioning
+    const candidates = [
+        { x: obstacleCenterX, y: obstacle.y - radius - 30, side: 'top' },
+        { x: obstacleCenterX, y: obstacle.y + obstacle.h + radius + 30, side: 'bottom' },
+        { x: obstacle.x - radius - 30, y: obstacleCenterY, side: 'left' },
+        { x: obstacle.x + obstacle.w + radius + 30, y: obstacleCenterY, side: 'right' }
+    ];
+    
+    // For complex maps, add diagonal waypoints for better navigation
+    if (isComplexMap) {
+        candidates.push(
+            { x: obstacle.x - radius - 30, y: obstacle.y - radius - 30, side: 'top-left' },
+            { x: obstacle.x + obstacle.w + radius + 30, y: obstacle.y - radius - 30, side: 'top-right' },
+            { x: obstacle.x - radius - 30, y: obstacle.y + obstacle.h + radius + 30, side: 'bottom-left' },
+            { x: obstacle.x + obstacle.w + radius + 30, y: obstacle.y + obstacle.h + radius + 30, side: 'bottom-right' }
+        );
+    }
+    
+    let bestCandidate = null;
+    let bestScore = -Infinity;
+    
+    for (const candidate of candidates) {
+        let score = 0;
+        
+        // Direction scoring - prefer the side that's toward the target
+        const toTargetX = targetX - obstacleCenterX;
+        const toTargetY = targetY - obstacleCenterY;
+        
+        if ((candidate.side === 'right' && toTargetX > 0) ||
+            (candidate.side === 'left' && toTargetX < 0) ||
+            (candidate.side === 'bottom' && toTargetY > 0) ||
+            (candidate.side === 'top' && toTargetY < 0)) {
+            score += 3;
+        }
+        
+        // For complex maps, prioritize waypoints that lead to open areas
+        if (isComplexMap) {
+            // Check if this waypoint leads to a more open path
+            const leadsToOpenArea = checkLeadsToOpenArea(candidate.x, candidate.y, targetX, targetY, radius);
+            if (leadsToOpenArea) {
+                score += 2;
+            }
+        }
+        
+        // Check if path to candidate is clear
+        if (!isPathBlocked(startX, startY, candidate.x, candidate.y, radius)) {
+            score += 2;
+        }
+        
+        // Check if path from candidate to target is clear
+        if (!isPathBlocked(candidate.x, candidate.y, targetX, targetY, radius)) {
+            score += 5;
+        }
+        
+        // Distance penalty (shorter paths are better)
+        const distanceToCandidate = Math.hypot(candidate.x - startX, candidate.y - startY);
+        const distanceFromCandidateToTarget = Math.hypot(targetX - candidate.x, targetY - candidate.y);
+        score -= (distanceToCandidate + distanceFromCandidateToTarget) / 100;
+        
+        if (score > bestScore) {
+            bestScore = score;
+            bestCandidate = candidate;
+        }
+    }
+    
+    if (bestCandidate && bestScore > 0) {
+        return { x: bestCandidate.x, y: bestCandidate.y };
+    }
+    
+    // Fallback for complex maps - use center-based navigation
+    if (isComplexMap) {
+        return navigateThroughComplexMap(startX, startY, targetX, targetY, obstacle, radius);
+    }
+    
+    // Original fallback
+    if (Math.abs(targetX - obstacleCenterX) > Math.abs(targetY - obstacleCenterY)) {
+        return {
+            x: targetX > obstacleCenterX ? 
+                obstacle.x + obstacle.w + radius + 30 : 
+                obstacle.x - radius - 30,
+            y: obstacleCenterY
+        };
+    } else {
+        return {
+            x: obstacleCenterX,
+            y: targetY > obstacleCenterY ? 
+                obstacle.y + obstacle.h + radius + 30 : 
+                obstacle.y - radius - 30
+        };
+    }
+
+}
+function navigateThroughComplexMap(startX, startY, targetX, targetY, obstacle, radius) {
+    // For complex maps, try to find pathways instead of going around obstacles
+    const obstacleCenterX = obstacle.x + obstacle.w / 2;
+    const obstacleCenterY = obstacle.y + obstacle.h / 2;
+    
+    // Look for existing pathways in complex maps
+    if (currentMap.name === 'Crossroads') {
+        // Crossroads-specific navigation - use the pathways
+        if (obstacleCenterY > MAP_HEIGHT / 2) {
+            // Bottom obstacles - go through center pathways
+            return { x: MAP_WIDTH / 2, y: MAP_HEIGHT / 2 - 50 };
+        } else {
+            // Top obstacles - use side pathways
+            return { x: MAP_WIDTH / 4, y: MAP_HEIGHT / 2 };
+        }
+    }
+    else if (currentMap.name === 'Tunnels') {
+        // Tunnels-specific navigation - follow the tunnel paths
+        if (obstacleCenterX < MAP_WIDTH / 2) {
+            // Left side obstacles
+            return { x: obstacle.x + obstacle.w + 60, y: obstacleCenterY };
+        } else {
+            // Right side obstacles  
+            return { x: obstacle.x - 60, y: obstacleCenterY };
+        }
+    }
+    
+    // Default fallback
+    return {
+        x: targetX > obstacleCenterX ? 
+            obstacle.x + obstacle.w + radius + 30 : 
+            obstacle.x - radius - 30,
+        y: obstacleCenterY
+    };
+}
+
+function checkLeadsToOpenArea(waypointX, waypointY, targetX, targetY, radius) {
+    // Simple check to see if this direction leads to more open space
+    const sampleDistance = 100;
+    const angle = Math.atan2(targetY - waypointY, targetX - waypointX);
+    
+    // Sample a point further along the path
+    const testX = waypointX + Math.cos(angle) * sampleDistance;
+    const testY = waypointY + Math.sin(angle) * sampleDistance;
+    
+    // Check if this area is relatively obstacle-free
+    let obstacleCount = 0;
+    for (let obs of currentMap.obstacles) {
+        const dist = Math.hypot(testX - (obs.x + obs.w/2), testY - (obs.y + obs.h/2));
+        if (dist < 150) { // If obstacle is nearby
+            obstacleCount++;
+        }
+    }
+    
+    return obstacleCount <= 1; // Prefer directions with 1 or fewer nearby obstacles
+}
+function isPathBlocked(x1, y1, x2, y2, radius) {
+    // Safety check for empty obstacles array
+    if (!currentMap.obstacles || currentMap.obstacles.length === 0) {
+        return false;
+    }
+    
+    // Check if path is blocked by any obstacle
+    for (let obs of currentMap.obstacles) {
+        if (isLineBlockedByObstacle(x1, y1, x2, y2, obs, radius)) {
+            return true;
+        }
+    }
+    return false;
+}
+function isLineBlockedByObstacle(x1, y1, x2, y2, obstacle, radius) {
+    if (!obstacle) return false;
+    
+    // More generous obstacle expansion for better pathfinding
+    const buffer = radius + 5; // Increased buffer for better corner avoidance
+    const expandedObstacle = {
+        x: obstacle.x - buffer,
+        y: obstacle.y - buffer,
+        w: obstacle.w + buffer * 2,
+        h: obstacle.h + buffer * 2
+    };
+    
+    return lineRectIntersection(x1, y1, x2, y2, expandedObstacle);
+}
+function isAITouchingObstacle() {
+    const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+    
+    for (let obs of currentMap.obstacles) {
+        if (circleRectCollision(player2.x, player2.y, radius, obs.x, obs.y, obs.w, obs.h)) {
+            return true;
+        }
+    }
+    return false;
+}
+function makeAIDecision() {
+    try {
+        const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+        
+        if (!aiNavigationGrid || aiLastSkinName !== (player2.skin ? player2.skin.name : 'default')) {
+            initializeNavigationGrid();
+            aiLastSkinName = player2.skin ? player2.skin.name : 'default';
+        }
+        
+        let target;
+        if (currentMap.name === 'Crossroads' || currentMap.name === 'Tunnels') {
+            target = getMapSpecificTarget();
+        } else {
+            target = getDefaultTarget();
+        }
+        
+        let targetX = target.x;
+        let targetY = target.y;
+        
+        // Only clamp if not chasing another player with crown, to allow AI to go to edges
+        if (!player1.hasCrown) {
+            targetX = Math.max(radius + 15, Math.min(MAP_WIDTH - radius - 15, targetX));
+            targetY = Math.max(radius + 15, Math.min(MAP_HEIGHT - radius - 15, targetY));
+        }
+        
+        // Prioritize a straight-line route if it's completely clear
+        if (!isPathBlocked(player2.x, player2.y, targetX, targetY, radius)) {
+            aiPath = [{ x: targetX, y: targetY }];
+        } else {
+            // Otherwise, use A* pathfinding first
+            aiPath = findPathAStar(player2.x, player2.y, targetX, targetY);
+            
+            // If A* fails or returns empty path, use smart obstacle waypoints
+            if (!aiPath || aiPath.length === 0) {
+                aiPath = createSmartObstacleWaypoint(player2.x, player2.y, targetX, targetY, radius);
+                // Smooth the path generated by createSmartObstacleWaypoint
+                if (aiPath.length > 0) {
+                    aiPath = smoothPath(aiPath, radius);
+                }
+            }
+            
+            // If we still have no path, use direct path (will trigger replanning if blocked)
+            if (!aiPath || aiPath.length === 0) {
+                aiPath = [{ x: targetX, y: targetY }];
+            }
+        }
+        
+        if (aiPath.length > 0) {
+            aiCurrentWaypointIndex = 0;
+            aiTargetX = aiPath[0].x;
+            aiTargetY = aiPath[0].y;
+        }
+        
+        aiStuckFrames = 0;
+        
+    } catch (error) {
+        console.error("Error in AI decision making:", error);
+        aiTargetX = player2.x + (Math.random() * 100 - 50);
+        aiTargetY = player2.y + (Math.random() * 100 - 50);
+        aiPath = [{ x: aiTargetX, y: aiTargetY }];
+        aiCurrentWaypointIndex = 0;
+    }
+}
+// Add this to track the last chosen path
+let lastPathHash = 0;
+let lastPathObstacleId = '';
+function avoidCorners(characterRadius) {
+    if (aiCurrentWaypointIndex >= aiPath.length - 1) return;
+    
+    const nextWaypoint = aiPath[aiCurrentWaypointIndex + 1];
+    const angleToNext = Math.atan2(nextWaypoint.y - player2.y, nextWaypoint.x - player2.x);
+    
+    // Try slight offsets to avoid cutting corners too close
+    const offsets = [-0.2, 0.2, -0.4, 0.4]; // radians
+    let bestOffset = 0;
+    let bestScore = -Infinity;
+    
+    for (const offset of offsets) {
+        const testAngle = angleToNext + offset;
+        const testX = player2.x + Math.cos(testAngle) * 50;
+        const testY = player2.y + Math.sin(testAngle) * 50;
+        
+        if (!isPositionBlocked(testX, testY, characterRadius)) {
+            const score = Math.cos(offset); // Prefer smaller offsets
+            if (score > bestScore) {
+                bestScore = score;
+                bestOffset = offset;
+            }
+        }
+    }
+    
+    if (bestScore > -Infinity) {
+        const adjustedAngle = angleToNext + bestOffset;
+        aiTargetX = player2.x + Math.cos(adjustedAngle) * 100;
+        aiTargetY = player2.y + Math.sin(adjustedAngle) * 100;
+    }
+}
+function avoidImmediateObstacle(dx, dy, speed, characterRadius) {
+    // Try a few perpendicular directions to avoid immediate collision
+    const baseAngle = Math.atan2(dy, dx);
+    const angles = [
+        baseAngle + Math.PI/2,    // 90 degrees right
+        baseAngle - Math.PI/2,    // 90 degrees left
+        baseAngle + Math.PI/4,    // 45 degrees right
+        baseAngle - Math.PI/4     // 45 degrees left
+    ];
+    
+    for (const angle of angles) {
+        const testDx = Math.cos(angle) * speed;
+        const testDy = Math.sin(angle) * speed;
+        const testX = player2.x + testDx;
+        const testY = player2.y + testDy;
+        
+        if (!isPositionBlocked(testX, testY, characterRadius)) {
+            player2.dx = testDx;
+            player2.dy = testDy;
+            return;
+        }
+    }
+    
+    // If all else fails, stop and wait for next decision cycle
+    player2.dx = 0;
+    player2.dy = 0;
+}
+
+function useAISmartAbility() {
+    const dist = Math.hypot(player2.x - player1.x, player2.y - player1.y);
+    const hasCrown = player2.hasCrown;
+    const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+
+    // Strategic ability usage based on situation
+    if (player2.skin.name === 'Zoomer' && player2.zoomCooldown <= 0) {
+        const shouldZoom = (hasCrown && dist < 150) || // Escape when threatened
+                          (player1.hasCrown && dist > 100 && dist < 300) || // Close distance to enemy
+                          (aiPath.length > 0 && aiCurrentWaypointIndex < aiPath.length - 2); // Skip long paths
+        
+        if (shouldZoom) {
+            performZoom(player2);
+            player2.zoomCooldown = player2.skin.zoomCooldown;
+        }
+    }
+    else if (player2.skin.name === 'Sprinter' && player2.sprintCooldown <= 0) {
+        const shouldSprint = (hasCrown && dist < 200) || // Escape
+                            (player1.hasCrown && dist > 150) || // Chase
+                            (aiPath.length > 5); // Long paths
+        
+        if (shouldSprint) {
+            player2.sprintTimer = player2.skin.sprintDuration;
+            player2.sprintCooldown = player2.skin.sprintCooldown;
+        }
+    }
+    else if (player2.skin.name === 'Ghost' && player2.ghostCooldown <= 0) {
+        let target;
+        if (currentMap.name === 'Crossroads' || currentMap.name === 'Tunnels') {
+            target = getMapSpecificTarget();
+        } else {
+            target = getDefaultTarget();
+        }
+        
+        let targetX = target.x;
+        let targetY = target.y;
+        
+        targetX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, targetX));
+        targetY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, targetY));
+        const isPathBlockedd = isPathBlocked(player2.x, player2.y, targetX, targetY, BASE_PLAYER_RADIUS);
+        const isInCorner = player2.x < 50 || player2.x > MAP_WIDTH - 50 || 
+                          player2.y < 50 || player2.y > MAP_HEIGHT - 50;
+        
+        if (isPathBlockedd || (hasCrown && isInCorner)) {
+            player2.ghostTimer = player2.skin.ghostDuration;
+            player2.ghostCooldown = player2.skin.ghostCooldown;
+        }
+    }
+    else if (player2.skin.name === 'Bouncer' && player2.bounceCooldown <= 0) {
+        if (hasCrown && dist < 150) {
+            player2.bounceTimer = player2.skin.bounceDuration;
+            player2.bounceCooldown = player2.skin.bounceCooldown;
+        }
+    }
+    else if (player2.skin.name === 'Shield' && player2.shieldCooldown <= 0) {
+        if (hasCrown && dist < 150) {
+            player2.shieldTimer = player2.skin.shieldDuration;
+            player2.shieldCooldown = player2.skin.shieldCooldown;
+        }
+    }
+}
+function loopAroundObstacle() {
+        let newX = player2.x;
+            let newY = player2.y + 5;
+let noideawhat=true;
+let needTravel=5;
+            const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+            newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
+            newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
+            let collides = false;
+            for (let obs of currentMap.obstacles) {
+                if (circleRectCollision(newX, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides){
+                while (noideawhat){
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    needTravel+=5;
+                    break;
+                } else if (!circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&newX+needTravel<MAP_WIDTH-radius){
+                    return [{x: player2.x+needTravel+10, y: player2.y-20}];
+                } else if (!circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&newX-needTravel>radius){
+                    return [{x: player2.x-needTravel-10, y: player2.y-20}];
+                }
+            }
+            if (needTravel>1000){
+                console.log("Failed");
+                break;
+            }
+                }
+            } 
+            newX = player2.x;
+            newY = player2.y-5;
+            noideawhat=true;
+            needTravel=5;
+            newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
+            newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
+            for (let obs of currentMap.obstacles) {
+                if (circleRectCollision(newX, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides){
+                while (noideawhat){
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    needTravel+=5;
+                    break;
+                } else if (!circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&newX+needTravel<MAP_WIDTH-radius){
+                    return [{x: player2.x+needTravel+10, y: player2.y+20}];
+                } else if (!circleRectCollision(newX+needTravel, newY, radius, obs.x, obs.y, obs.w, obs.h)&&newX-needTravel>radius){
+                    return [{x: player2.x-needTravel-10, y: player2.y+20}];
+                }
+            }
+            if (needTravel>1000){
+                console.log("Failed");
+                break;
+            }
+                }
+            } 
+            newX = player2.x+5;
+            newY = player2.y;
+            noideawhat=true;
+            needTravel=5;
+            newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
+            newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
+            for (let obs of currentMap.obstacles) {
+                if (circleRectCollision(newX, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides){
+                while (noideawhat){
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    needTravel+=5;
+                    break;
+                } else if (!circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&newY+needTravel<MAP_HEIGHT-radius){
+                    return [{x: player2.x-10, y: player2.y+needTravel+20}];
+                } else if (!circleRectCollision(newX, newY-needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&newY-needTravel>radius){
+                    return [{x: player2.x-10, y: player2.y-needTravel-20}];
+                }
+            }
+            if (needTravel>1000){
+                console.log("Failed");
+                break;
+            }
+                }
+            }
+            newX = player2.x-5;
+            newY = player2.y;
+            noideawhat=true;
+            needTravel=5;
+            newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
+            newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
+            for (let obs of currentMap.obstacles) {
+                if (circleRectCollision(newX, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    collides = true;
+                    break;
+                }
+            }
+            if (collides){
+                while (noideawhat){
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    needTravel+=5;
+                    break;
+                } else if (!circleRectCollision(newX, newY+needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&newY+needTravel<MAP_HEIGHT-radius){
+                    return [{x: player2.x+10, y: player2.y+needTravel+20}];
+                } else if (!circleRectCollision(newX, newY-needTravel, radius, obs.x, obs.y, obs.w, obs.h)&&newY-needTravel>radius){
+                    return [{x: player2.x-10, y: player2.y-needTravel-20}];
+                }
+            }
+            if (needTravel>1000){
+                console.log("Failed");
+                break;
+            }
+                }
+            }
+            console.log("No good path");
+            return [];
+            }
+            function makeAIDecision() {
+    try {
+        const radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+        
+        if (!aiNavigationGrid || aiLastSkinName !== (player2.skin ? player2.skin.name : 'default')) {
+            initializeNavigationGrid();
+            aiLastSkinName = player2.skin ? player2.skin.name : 'default';
+        }
+        
+        let target;
+        if (currentMap.name === 'Crossroads' || currentMap.name === 'Tunnels') {
+            target = getMapSpecificTarget();
+        } else {
+            target = getDefaultTarget();
+        }
+        
+        let targetX = Math.max(radius + 10, Math.min(MAP_WIDTH - radius - 10, target.x));
+        let targetY = Math.max(radius + 10, Math.min(MAP_HEIGHT - radius - 10, target.y));
+        
+        // Always use A* pathfinding first
+        aiPath = findPathAStar(player2.x, player2.y, targetX, targetY);
+        
+        // If A* fails or returns empty path, use smart obstacle waypoints
+        if (!aiPath || aiPath.length === 0) {
+            aiPath = createSmartObstacleWaypoint(player2.x, player2.y, targetX, targetY, radius);
+        }
+        
+        // If we still have no path, use direct path (will trigger replanning if blocked)
+        if (!aiPath || aiPath.length === 0) {
+            aiPath = [{ x: targetX, y: targetY }];
+        }
+        
+        if (aiPath.length > 0) {
+            aiCurrentWaypointIndex = 0;
+            aiTargetX = aiPath[0].x;
+            aiTargetY = aiPath[0].y;
+        }
+        
+        aiStuckFrames = 0;
+        
+    } catch (error) {
+        console.error("Error in AI decision making:", error);
+        aiTargetX = player2.x + (Math.random() * 100 - 50);
+        aiTargetY = player2.y + (Math.random() * 100 - 50);
+        aiPath = [{ x: aiTargetX, y: aiTargetY }];
+        aiCurrentWaypointIndex = 0;
+    }
+}
+
+function createSmartObstacleWaypoint(startX, startY, targetX, targetY, radius) {
+    // Find all obstacles between start and target
+    const blockingObstacles = [];
+    
+    for (let obs of currentMap.obstacles) {
+        if (isLineBlockedByObstacle(startX, startY, targetX, targetY, obs, radius)) {
+            blockingObstacles.push(obs);
+        }
+    }
+    
+    if (blockingObstacles.length === 0) {
+        return [{ x: targetX, y: targetY }];
+    }
+    
+    // Sort obstacles by distance to start point
+    blockingObstacles.sort((a, b) => {
+        const distA = Math.hypot(startX - (a.x + a.w/2), startY - (a.y + a.h/2));
+        const distB = Math.hypot(startX - (b.x + b.w/2), startY - (b.y + b.h/2));
+        return distA - distB;
+    });
+    
+    const closestObs = blockingObstacles[0];
+    const safeDistance = radius + 30; // Use a slightly larger buffer here to be safe
+
+    const obstacleCenterX = closestObs.x + closestObs.w / 2;
+    const obstacleCenterY = closestObs.y + closestObs.h / 2;
+
+    const waypoints = [];
+
+    // Determine if the obstacle is primarily blocking horizontal or vertical movement
+    const isHorizontalBlock = Math.abs(targetX - startX) > Math.abs(targetY - startY);
+
+    if (isHorizontalBlock) {
+        // Obstacle is more horizontally aligned, need to go around vertically
+        let intermediateX;
+        let intermediateY;
+
+        // Choose to go right or left around the obstacle
+        if (targetX > obstacleCenterX) { // Target is to the right of obstacle
+            intermediateX = closestObs.x + closestObs.w + safeDistance;
+        } else { // Target is to the left of obstacle
+            intermediateX = closestObs.x - safeDistance;
+        }
+
+        // Choose to go above or below the obstacle, based on target's Y relative to obstacle
+        if (targetY > obstacleCenterY) { // Target is below obstacle
+            intermediateY = closestObs.y + closestObs.h + safeDistance;
+        } else { // Target is above obstacle
+            intermediateY = closestObs.y - safeDistance;
+        }
+
+        // Add the first waypoint, which clears both horizontal and vertical extents of the obstacle
+        waypoints.push({ x: intermediateX, y: intermediateY });
+
+        // Add a second waypoint that aligns with the target's primary axis
+        waypoints.push({ x: intermediateX, y: targetY });
+
+    } else {
+        // Obstacle is more vertically aligned, need to go around horizontally
+        let intermediateX;
+        let intermediateY;
+
+        // Choose to go below or above the obstacle
+        if (targetY > obstacleCenterY) { // Target is below obstacle
+            intermediateY = closestObs.y + closestObs.h + safeDistance;
+        } else { // Target is above obstacle
+            intermediateY = closestObs.y - safeDistance;
+        }
+
+        // Choose to go left or right of the obstacle, based on target's X relative to obstacle
+        if (targetX > obstacleCenterX) { // Target is to the right of obstacle
+            intermediateX = closestObs.x + closestObs.w + safeDistance;
+        } else { // Target is to the left of obstacle
+            intermediateX = closestObs.x - safeDistance;
+        }
+        
+        // Add the first waypoint, which clears both horizontal and vertical extents of the obstacle
+        waypoints.push({ x: intermediateX, y: intermediateY });
+
+        // Add a second waypoint that aligns with the target's primary axis
+        waypoints.push({ x: targetX, y: intermediateY });
+    }
+
+    // Add final target
+    waypoints.push({ x: targetX, y: targetY });
+    
+    return waypoints;
+}
+function shouldUseWallSliding(player) {
+    if (player.stunned) return false;
+    
+    const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+    
+    // Only use wall sliding if we're actually touching a wall AND trying to move into it
+    if (!isPositionBlocked(player.x, player.y, radius * 1.05)) return false;
+    
+    // Check if we're trying to move into the wall we're touching
+    const testX = player.x + player.dx;
+    const testY = player.y + player.dy;
+    
+    return isPositionBlocked(testX, testY, radius);
+}
+function handleWallSliding(player) {
+    if (player.stunned || (player.dx === 0 && player.dy === 0)) return;
+    
+    const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+    const slideMultiplier = (player === player2) ? 1.0 : 0.7; // AI does not slow down during wall slide
+    
+    // Test movement in both directions separately
+    const testX = player.x + player.dx;
+    const testY = player.y + player.dy;
+    
+    const blockedX = isPositionBlocked(testX, player.y, radius);
+    const blockedY = isPositionBlocked(player.x, testY, radius);
+    
+    // Apply wall sliding based on which directions are blocked
+    if (blockedX && !blockedY) {
+        // Blocked horizontally - slide vertically
+        player.dx = 0;
+        player.dy *= slideMultiplier;
+    } else if (!blockedX && blockedY) {
+        // Blocked vertically - slide horizontally
+        player.dx *= slideMultiplier;
+        player.dy = 0;
+    } else if (blockedX && blockedY) {
+        // Blocked in both directions - try to slide in dominant direction
+        if (Math.abs(player.dx) > Math.abs(player.dy)) {
+            player.dx *= slideMultiplier;
+            player.dy = 0;
+        } else {
+            player.dx = 0;
+            player.dy *= slideMultiplier;
+        }
+    }
+}
+// NEW FUNCTION: Find emergency escape route
+function findEmergencyEscape(radius) {
+    console.log("Finding emergency escape route");
+    
+    // Try 8 directions to find an escape
+    const directions = [];
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        directions.push(angle);
+    }
+    
+    let bestX = MAP_WIDTH / 2;
+    let bestY = MAP_HEIGHT / 2;
+    let bestDistance = 0;
+    
+    for (const angle of directions) {
+        const testX = player2.x + Math.cos(angle) * 200;
+        const testY = player2.y + Math.sin(angle) * 200;
+        
+        if (!isPositionBlocked(testX, testY, radius) && 
+            !isPathBlocked(player2.x, player2.y, testX, testY, radius)) {
+            
+            const distanceFromWalls = calculateDistanceFromWalls(testX, testY);
+            if (distanceFromWalls > bestDistance) {
+                bestDistance = distanceFromWalls;
+                bestX = testX;
+                bestY = testY;
+            }
+        }
+    }
+    
+    aiTargetX = bestX;
+    aiTargetY = bestY;
+    aiPath = [{ x: bestX, y: bestY }];
+    aiCurrentWaypointIndex = 0;
+    aiStuckFrames = 0;
+}
+
+// NEW FUNCTION: Calculate distance from walls
+function calculateDistanceFromWalls(x, y) {
+    const distToLeft = x;
+    const distToRight = MAP_WIDTH - x;
+    const distToTop = y;
+    const distToBottom = MAP_HEIGHT - y;
+    return Math.min(distToLeft, distToRight, distToTop, distToBottom);
+}
+
+// NEW FUNCTION: Find nearest open space
+function findNearestOpenSpace(radius) {
+    console.log("Finding nearest open space");
+    
+    // Check points in a spiral pattern around the AI
+    const maxRadius = 300;
+    const step = 20;
+    
+    for (let r = step; r <= maxRadius; r += step) {
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+            const testX = player2.x + Math.cos(angle) * r;
+            const testY = player2.y + Math.sin(angle) * r;
+            
+            if (testX >= radius && testX <= MAP_WIDTH - radius &&
+                testY >= radius && testY <= MAP_HEIGHT - radius &&
+                !isPositionBlocked(testX, testY, radius)) {
+                
+                aiTargetX = testX;
+                aiTargetY = testY;
+                aiPath = [{ x: testX, y: testY }];
+                aiCurrentWaypointIndex = 0;
+                return;
+            }
+        }
+    }
+    aiPath = loopAroundObstacle();
+    // Fallback to center if nothing found
+    aiTargetX = aiPath[0].x;
+    aiTargetY = aiPath[0].y;
+    
+    aiCurrentWaypointIndex = 0;
+}
+
+function checkIfInCorner(x, y, radius) {
+    const cornerThreshold = 80; // Distance from corner to consider stuck
+    const cornerCheckRadius = 30; // Area around player to check for corner
+    
+    // Check all four corners
+    const corners = [
+        { x: radius + cornerThreshold, y: radius + cornerThreshold }, // Top-left
+        { x: MAP_WIDTH - radius - cornerThreshold, y: radius + cornerThreshold }, // Top-right
+        { x: radius + cornerThreshold, y: MAP_HEIGHT - radius - cornerThreshold }, // Bottom-left
+        { x: MAP_WIDTH - radius - cornerThreshold, y: MAP_HEIGHT - radius - cornerThreshold } // Bottom-right
+    ];
+    
+    for (const corner of corners) {
+        const distance = Math.hypot(x - corner.x, y - corner.y);
+        if (distance < cornerCheckRadius) {
+            return true;
+        }
+    }
+    
+    // Also check if stuck against edges
+    const edgeThreshold = 30;
+    if (x < radius + edgeThreshold || x > MAP_WIDTH - radius - edgeThreshold ||
+        y < radius + edgeThreshold || y > MAP_HEIGHT - radius - edgeThreshold) {
+        
+        // Check if not moving for a while (indicating stuck)
+        const movedDistance = Math.hypot(player2.x - aiLastPositionX, player2.y - aiLastPositionY);
+        if (movedDistance < 2) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+function findMostValuableBoost() {
+    let bestBoost = speedBoosts[0];
+    let bestValue = -Infinity;
+    
+    for (const boost of speedBoosts) {
+        // Value based on distance and strategic position
+        const distance = Math.hypot(player2.x - boost.x, player2.y - boost.y);
+        const value = 1000 / distance; // Closer boosts are more valuable
+        
+        if (value > bestValue) {
+            bestValue = value;
+            bestBoost = boost;
+        }
+    }
+    
+    return bestBoost;
+}
+function isInCorner(x, y) {
+    const cornerThreshold = 100;
+    return (x < cornerThreshold && y < cornerThreshold) || // Top-left
+           (x > MAP_WIDTH - cornerThreshold && y < cornerThreshold) || // Top-right
+           (x < cornerThreshold && y > MAP_HEIGHT - cornerThreshold) || // Bottom-left
+           (x > MAP_WIDTH - cornerThreshold && y > MAP_HEIGHT - cornerThreshold); // Bottom-right
+}
+
+function getSafePosition() {
+    // Define safe zones (areas away from corners and edges)
+    const safeZones = [
+        { x: MAP_WIDTH * 0.3, y: MAP_HEIGHT * 0.3 },
+        { x: MAP_WIDTH * 0.7, y: MAP_HEIGHT * 0.3 },
+        { x: MAP_WIDTH * 0.3, y: MAP_HEIGHT * 0.7 },
+        { x: MAP_WIDTH * 0.7, y: MAP_HEIGHT * 0.7 },
+        { x: MAP_WIDTH * 0.5, y: MAP_HEIGHT * 0.5 }
+    ];
+    
+    // Return a random safe zone, weighted toward center on higher difficulties
+    const centerBias = aiDifficulty * 0.05;
+    if (Math.random() < centerBias) {
+        return safeZones[4]; // Center
+    }
+    return safeZones[Math.floor(Math.random() * safeZones.length)];
+}
+function isPositionBlocked(x, y, radius) {
+    // Ghost players can pass through obstacles when ghostTimer > 0
+    if (player2.skin && player2.skin.name === 'Ghost' && player2.ghostTimer > 0) {
+        return false;
+    }
+    
+    // Check bounds
+    if (x < radius || x > MAP_WIDTH - radius || y < radius || y > MAP_HEIGHT - radius) {
+        return true;
+    }
+    
+    // Check obstacles with character radius consideration
+    for (let obs of currentMap.obstacles) {
+        if (circleRectCollision(x, y, radius, obs.x, obs.y, obs.w, obs.h)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// More precise collision detection
+function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
+    // Find the closest point on the rectangle to the circle
+    let closestX = Math.max(rx, Math.min(cx, rx + rw));
+    let closestY = Math.max(ry, Math.min(cy, ry + rh));
+    
+    // Calculate the distance between the circle's center and this closest point
+    let distanceX = cx - closestX;
+    let distanceY = cy - closestY;
+    let distance = Math.sqrt(distanceX * distanceX + distanceY * distanceY);
+    
+    // If the distance is less than the circle's radius, collision
+    return distance < r;
+}
+        function drawCrown(x, y) {
+            ctx.fillStyle = '#ffd700';
+            ctx.beginPath();
+            ctx.moveTo(x - CROWN_SIZE / 2, y + CROWN_SIZE / 2);
+            ctx.lineTo(x + CROWN_SIZE / 2, y + CROWN_SIZE / 2);
+            ctx.lineTo(x, y - CROWN_SIZE / 2);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawSpeedBoost(x, y) {
+            ctx.fillStyle = '#0000ff';
+            ctx.beginPath();
+            ctx.moveTo(x - BOOST_SIZE / 2, y + BOOST_SIZE / 2);
+            ctx.lineTo(x + BOOST_SIZE / 2, y);
+            ctx.lineTo(x - BOOST_SIZE / 2, y - BOOST_SIZE / 2);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function MudPatch(x, y, r) {
+            this.x = x;
+            this.y = y;
+            this.r = r;
+            this.draw = function(ctx) {
+                ctx.fillStyle = '#8b4513';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+                ctx.fill();
+            };
+        }
+
+        function Obstacle(x, y, w, h, c) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
+            this.draw = function(ctx) {
+                ctx.fillStyle = c;
+                ctx.fillRect(this.x, this.y, this.w, this.h);
+            };
+        }
+        function isInMud(player, map) {
+            if (player.skin && player.skin.immune) return false;
+            const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+            for (let mud of map.mudPatches) {
+                const dist = Math.hypot(player.x - mud.x, player.y - mud.y);
+                if (dist < radius + mud.r) return true;
+            }
+            return false;
+        }
+
+        function getCurrentSpeed(player) {
+            if (!player.skin) return BASE_SPEED;
+            let speed = player.skin.speed;
+            if (player.skin.immune) return speed;
+            if (player.sprintTimer > 0 && player.skin.name === 'Sprinter') {
+                speed *= player.skin.sprintMultiplier;
+            }
+            if (player.boostTimer > 0) {
+                speed *= player.boostMultiplier;
+            }
+            if (player.mudTimer > 0) {
+                speed *= MUD_MULTIPLIER;
+            }
+            if (player.hasCrown) {
+                speed *= 0.9;
+            }
+            return speed;
+        }
+
+        function performZoom(player) {
+            if (player.dx === 0 && player.dy === 0) return;
+            const magnitude = Math.hypot(player.dx, player.dy);
+            const angle = Math.atan2(player.dy, player.dx);
+            let targetX = player.x + Math.cos(angle) * ZOOMER_DISTANCE;
+            let targetY = player.y + Math.sin(angle) * ZOOMER_DISTANCE;
+            targetX = Math.max(player.skin.size / 2, Math.min(MAP_WIDTH - player.skin.size / 2, targetX));
+            targetY = Math.max(player.skin.size / 2, Math.min(MAP_HEIGHT - player.skin.size / 2, targetY));
+
+            let valid = true;
+            let closestX = player.x, closestY = player.y;
+            const steps = 10;
+            player.teleportTrail = [];
+            for (let i = 1; i <= steps; i++) {
+                const testX = player.x + (targetX - player.x) * (i / steps);
+                const testY = player.y + (targetY - player.y) * (i / steps);
+                let collides = false;
+                for (let obs of currentMap.obstacles) {
+                    if (circleRectCollision(testX, testY, player.skin.size / 2, obs.x, obs.y, obs.w, obs.h)) {
+                        collides = true;
+                        break;
+                    }
+                }
+                if (collides) {
+                    valid = false;
+                    break;
+                } else {
+                    closestX = testX;
+                    closestY = testY;
+                    player.teleportTrail.push({x: testX, y: testY});
+                }
+            }
+            if (valid) {
+                player.x = targetX;
+                player.y = targetY;
+                player.teleportTrail.push({x: targetX, y: targetY});
+            } else {
+                player.x = closestX;
+                player.y = closestY;
+                player.teleportTrail.push({x: closestX, y: closestY});
+            }
+            setTimeout(() => { player.teleportTrail = []; }, 1000);
+        }
+
+        function movePlayer(player) {
+    if (player.stunned) return;
+    
+    // Apply wall sliding only for human players (not AI)
+    if (player === player1 || player === player2) { // Apply wall sliding to both player1 and player2
+        handleWallSliding(player);
+    }
+    
+    let newX = player.x + player.dx;
+    let newY = player.y + player.dy;
+
+    const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+    newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
+    newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
+
+    if (player.skin && player.skin.name === 'Ghost' && player.ghostTimer > 0) {
+        player.x = newX;
+        player.y = newY;
+        return;
+    }
+
+    let collides = false;
+    for (let obs of currentMap.obstacles) {
+        if (circleRectCollision(newX, newY, radius, obs.x, obs.y, obs.w, obs.h)) {
+            collides = true;
+            break;
+        }
+    }
+    
+    if (!collides || (player.skin && player.skin.name === 'Ghost' && player.ghostTimer > 0)) {
+        player.x = newX;
+        player.y = newY;
+    }
+}
+        function checkCollision(p1, p2) {
+            if (p1.stunned || p2.stunned) return false;
+
+            const p1Radius = p1.skin ? p1.skin.size / 2 : BASE_PLAYER_RADIUS;
+            const p2Radius = p2.skin ? p2.skin.size / 2 : BASE_PLAYER_RADIUS;
+            const dist = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+            if (dist < p1Radius + p2Radius) {
+                if (p1.skin && p1.skin.name === 'Bouncer' && p1.bounceTimer > 0 && !p2.stunned && p1.hasCrown) {
+                    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                    let newX = p1.x + Math.cos(angle) * p1.skin.bounceForce;
+                    let newY = p1.y + Math.sin(angle) * p1.skin.bounceForce;
+                    newX = Math.max(p2Radius, Math.min(MAP_WIDTH - p2Radius, newX));
+                    newY = Math.max(p2Radius, Math.min(MAP_HEIGHT - p2Radius, newY));
+                    let collides = false;
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX, newY, p2Radius, obs.x, obs.y, obs.w, obs.h)) {
+                            collides = true;
+                            break;
+                        }
+                    }
+                    if (!collides) {
+                        p2.x = newX;
+                        p2.y = newY;
+                    }
+                    return false;
+                }
+                if (p2.skin && p2.skin.name === 'Bouncer' && p2.bounceTimer > 0 && !p1.stunned && p2.hasCrown) {
+                    const angle = Math.atan2(p1.y - p2.y, p1.x - p2.x);
+                    let newX = p2.x + Math.cos(angle) * p2.skin.bounceForce;
+                    let newY = p2.y + Math.sin(angle) * p2.skin.bounceForce;
+                    newX = Math.max(p1Radius, Math.min(MAP_WIDTH - p1Radius, newX));
+                    newY = Math.max(p1Radius, Math.min(MAP_HEIGHT - p1Radius, newY));
+                    let collides = false;
+                    for (let obs of currentMap.obstacles) {
+                        if (circleRectCollision(newX, newY, p1Radius, obs.x, obs.y, obs.w, obs.h)) {
+                            collides = true;
+                            break;
+                        }
+                    }
+                    if (!collides) {
+                        p1.x = newX;
+                        p1.y = newY;
+                    }
+                    return false;
+                }
+                if (p1.stunned || p2.stunned || 
+                    (p1.skin && p1.skin.name === 'Shield' && p1.shieldTimer > 0 && p1.hasCrown) || 
+                    (p2.skin && p2.skin.name === 'Shield' && p2.shieldTimer > 0 && p2.hasCrown)) {
+                    return false;
+                }
+                if (((p1.skin&&p1.skin.name==='Heavy'&&p1.hasCrown)||(p2.skin&&p2.skin.name==='Heavy'&&p2.hasCrown))&&Math.random()<0.4){
+                    return "back";
+                }
+                return true;
+            }
+            return false;
+        }
+
+        function checkBoostPickup(player) {
+            if (player.skin && player.skin.immune) return;
+            const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+            for (let i = speedBoosts.length - 1; i >= 0; i--) {
+                const boost = speedBoosts[i];
+                if (Math.hypot(player.x - boost.x, player.y - boost.y) < radius + BOOST_SIZE / 2) {
+                    if (player.boostTimer<=0){
+                    player.boostTimer = BOOST_DURATION;
+                    player.boostMultiplier = BOOST_MULTIPLIER;
+                    } else {
+                        player.boostTimer += BOOST_DURATION; 
+                    }
+                    speedBoosts.splice(i, 1);
+                }
+            }
+        }
+
+        function spawnSpeedBoost(map) {
+            let x, y, valid;
+            do {
+                x = Math.random() * (MAP_WIDTH - BOOST_SIZE) + BOOST_SIZE / 2;
+                y = Math.random() * (MAP_HEIGHT - BOOST_SIZE) + BOOST_SIZE / 2;
+                valid = true;
+                for (let obs of map.obstacles) {
+                    if (circleRectCollision(x, y, BOOST_SIZE / 2, obs.x, obs.y, obs.w, obs.h)) {
+                        valid = false;
+                        break;
+                    }
+                }
+                for (let mud of map.mudPatches) {
+                    if (Math.hypot(x - mud.x, y - mud.y) < BOOST_SIZE / 2 + mud.r) {
+                        valid = false;
+                        break;
+                    }
+                }
+                const p1Radius = player1.skin ? player1.skin.size / 2 : BASE_PLAYER_RADIUS;
+                const p2Radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+                if (Math.hypot(x - player1.x, y - player1.y) < BOOST_SIZE / 2 + p1Radius ||
+                    Math.hypot(x - player2.x, y - player2.y) < BOOST_SIZE / 2 + p2Radius) {
+                    valid = false;
+                }
+            } while (!valid);
+            speedBoosts.push({x, y});
+        }
+
+        function updatePlayerMovement(player, up, down, left, right, action) {
+            player.dx = 0;
+            player.dy = 0;
+            let speed = getCurrentSpeed(player);
+            const abilityKey = player===player1 ? ' ' : 'enter';
+            if (player.skin && player.skin.name === 'Sprinter' && keys[abilityKey] && player.sprintCooldown <= 0 && !player.stunned) {
+                player.sprintTimer = player.skin.sprintDuration;
+                player.sprintCooldown = player.skin.sprintCooldown;
+            }
+            if (player.sprintTimer > 0) {
+                speed *= player.skin.sprintMultiplier;
+            }
+            if (player.skin && player.skin.name === 'Ghost' && keys[abilityKey] && player.ghostCooldown <= 0 && !player.stunned) {
+                player.ghostTimer = player.skin.ghostDuration;
+                player.ghostCooldown = player.skin.ghostCooldown;
+            }
+            if (player.skin && player.skin.name === 'Bouncer' && keys[abilityKey] && player.bounceCooldown <= 0 && !player.stunned) {
+                player.bounceTimer = player.skin.bounceDuration;
+                player.bounceCooldown=player.skin.bounceCooldown
+            }
+            if (player.skin && player.skin.name === 'Shield' && keys[abilityKey] && player.shieldCooldown <= 0 && !player.stunned) {
+                player.shieldTimer = player.skin.shieldDuration;
+                player.shieldCooldown = player.skin.shieldCooldown;
+            }
+            if (keys[up]) player.dy -= speed;
+            if (keys[down]) player.dy += speed;
+            if (keys[left]) player.dx -= speed;
+            if (keys[right]) player.dx += speed;
+            if (player.skin && player.skin.name === 'Zoomer' && keys[abilityKey] && player.zoomCooldown <= 0 && !player.stunned) {
+                performZoom(player);
+                player.zoomCooldown = player.skin.zoomCooldown;
+            }
+        }
+
+        function resetGame() {
+            player1.hasCrown = false;
+            player1.holdTime = 0;
+            player1.stunned = false;
+            player1.stunTimer = 0;
+            player1.boostTimer = 0;
+            player1.boostMultiplier = 1;
+            player1.mudTimer = 0;
+            player1.inMud = false;
+            player1.skin = null;
+            player1.zoomCooldown = 0;
+            player1.sprintTimer = 0;
+            player1.sprintCooldown = 0;
+            player1.ghostTimer = 0;
+            player1.ghostCooldown = 0;
+            player1.bounceTimer = 0;
+            player1.shieldTimer = 0;
+            player1.teleportTrail = [];
+            player1.shieldCooldown=0;
+            player1.bounceCooldown=0;
+            player2.hasCrown = false;
+            player2.holdTime = 0;
+            player2.stunned = false;
+            player2.stunTimer = 0;
+            player2.boostTimer = 0;
+            player2.boostMultiplier = 1;
+            player2.mudTimer = 0;
+            player2.inMud = false;
+            player2.skin = null;
+            player2.zoomCooldown = 0;
+            player2.sprintTimer = 0;
+            player2.sprintCooldown = 0;
+            player2.ghostTimer = 0;
+            player2.ghostCooldown = 0;
+            player2.bounceTimer = 0;
+            player2.shieldTimer = 0;
+            player2.teleportTrail = [];
+            player2.bounceCooldown=0;
+            player2.shieldCooldown=0;
+            aiCurrentPath = [];
+    aiPathIndex = 0;
+    aiPathfindingTimer = 0;
+    aiLastPositionX = player2.x;
+    aiLastPositionY = player2.y;
+    aiStuckFrames = 0;
+            crown.picked = false;
+            countdown = 3;
+            countdownTimer = countdownInterval;
+            winMessage.style.display = 'none';
+            restartButton.style.display = 'none';
+            startScreen.style.display = 'block';
+            gameState = 'start';
+            info.innerHTML = '';
+            speedBoosts = [];
+            boostSpawnTimer = 0;
+            usedSkins = [];
+            currentPlayer=1;
+            if (gameMode === 'pvp') {
+        document.getElementById('ai-difficulty').style.display = 'none';
+    } else {
+        document.getElementById('ai-difficulty').style.display = 'block';
+    }
+            setupSkinSelection()
+        }
+
+        function drawPlayer(player) {
+            if (player.hasCrown) {
+                drawCrown(player.x, player.y - (player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS) - CROWN_SIZE / 2);
+            }
+            if (player.skin) {
+                player.skin.draw(ctx, player);
+            } else {
+                ctx.fillStyle = player.stunned ? '#696969' : player.boostTimer > 0 ? '#00ff00' : player.mudTimer > 0 ? '#8b4513' : player.color;
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, BASE_PLAYER_RADIUS, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        function drawViewport(player, viewportX) {
+            let camX = player.x - VIEW_WIDTH / 2;
+            let camY = player.y - VIEW_HEIGHT / 2;
+
+            camX = Math.max(0, Math.min(MAP_WIDTH - VIEW_WIDTH, camX));
+            camY = Math.max(0, Math.min(MAP_HEIGHT - VIEW_HEIGHT, camY));
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(viewportX, 0, VIEW_WIDTH, VIEW_HEIGHT);
+            ctx.clip();
+
+            ctx.translate(viewportX - camX, -camY);
+
+            drawBackground();
+
+            for (let mud of currentMap.mudPatches) {
+                mud.draw(ctx);
+            }
+
+            for (let obs of currentMap.obstacles) {
+                obs.draw(ctx);
+            }
+
+            if (!crown.picked) {
+                drawCrown(crown.x, crown.y);
+            }
+
+            for (let boost of speedBoosts) {
+                drawSpeedBoost(boost.x, boost.y);
+            }
+
+            drawPlayer(player1);
+            drawPlayer(player2);
+            if (gameMode === 'pve') {
+    // Draw AI target and path
+    ctx.save();
+    ctx.strokeStyle = '#ff0000';
+    ctx.setLineDash([5, 5]);
+    ctx.beginPath();
+    ctx.moveTo(player2.x, player2.y);
+    ctx.lineTo(aiTargetX, aiTargetY);
+    ctx.stroke();
+    
+    ctx.fillStyle = '#ff0000';
+    ctx.beginPath();
+    ctx.arc(aiTargetX, aiTargetY, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+}
+if (gameMode === 'pve' && aiPath.length > 0) {
+    // Draw AI path
+    ctx.save();
+    ctx.strokeStyle = '#ff0000';
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 2;
+    
+    // Draw complete path
+    ctx.beginPath();
+    ctx.moveTo(player2.x, player2.y);
+    for (let i = 0; i < aiPath.length; i++) {
+        ctx.lineTo(aiPath[i].x, aiPath[i].y);
+    }
+    ctx.stroke();
+    
+    // Draw waypoints
+    ctx.fillStyle = '#ff0000';
+    for (let i = 0; i < aiPath.length; i++) {
+        ctx.beginPath();
+        ctx.arc(aiPath[i].x, aiPath[i].y, 4, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    
+    // Draw current target
+    ctx.fillStyle = '#00ff00';
+    ctx.beginPath();
+    ctx.arc(aiTargetX, aiTargetY, 6, 0, Math.PI * 2);
+    ctx.fill();
+    
+    ctx.restore();
+}
+            ctx.restore();
+
+            // Draw minimap below both viewports
+            const miniScale = MINI_WIDTH / MAP_WIDTH;
+            ctx.save();
+            ctx.translate(350 - MINI_WIDTH / 2, VIEW_HEIGHT);
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2 / miniScale;
+            ctx.strokeRect(-1 / miniScale, -1 / miniScale, MAP_WIDTH + 2 / miniScale, MAP_HEIGHT + 2 / miniScale);
+            ctx.scale(miniScale, miniScale);
+
+            ctx.fillStyle = currentMap.backgroundColor;
+            ctx.fillRect(0, 0, MAP_WIDTH, MAP_HEIGHT);
+
+            for (let mud of currentMap.mudPatches) {
+                mud.draw(ctx);
+            }
+
+            for (let obs of currentMap.obstacles) {
+                obs.draw(ctx);
+            }
+
+            if (!crown.picked) {
+                drawCrown(crown.x, crown.y);
+            }
+
+            for (let boost of speedBoosts) {
+                drawSpeedBoost(boost.x, boost.y);
+            }
+
+            ctx.fillStyle = player1.color;
+            ctx.beginPath();
+            ctx.arc(player1.x, player1.y, (player1.skin ? player1.skin.size / 2 : BASE_PLAYER_RADIUS), 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = player2.color;
+            ctx.beginPath();
+            ctx.arc(player2.x, player2.y, (player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS), 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function updateGame(dt) {
+            if (gameState === 'countdown') {
+                countdownTimer -= dt * 1000;
+                if (countdownTimer <= 0) {
+                    countdown--;
+                    countdownEl.textContent = countdown;
+                    countdownTimer = countdownInterval;
+                    if (countdown <= 0) {
+                        gameState = 'playing';
+                        countdownEl.style.display = 'none';
+                    }
+                }
+                return;
+            }
+
+            if (gameState !== 'playing') return;
+            if (!player1.stunned) {
+                updatePlayerMovement(player1, 'w', 's', 'a', 'd', ' ');
+            }
+            if (gameMode==="pve"){
+                updateAIMovement(dt);
+            } else {
+            if (!player2.stunned) {
+                updatePlayerMovement(player2, 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'enter');
+            }
+        }
+            if (player1.stunTimer > 0) {
+                player1.stunTimer -= dt * 1000;
+                if (player1.stunTimer <= 0) {
+                    player1.stunned = false;
+                }
+            }
+            if (player2.stunTimer > 0) {
+                player2.stunTimer -= dt * 1000;
+                if (player2.stunTimer <= 0) {
+                    player2.stunned = false;
+                }
+            }
+            if (player1.boostTimer > 0) {
+                player1.boostTimer -= dt * 1000;
+                if (player1.boostTimer <= 0) {
+                    player1.boostMultiplier = 1;
+                }
+            }
+            if (player2.boostTimer > 0) {
+                player2.boostTimer -= dt * 1000;
+                if (player2.boostTimer <= 0) {
+                    player2.boostMultiplier = 1;
+                }
+            }
+            if (player1.mudTimer > 0) {
+                player1.mudTimer -= dt * 1000;
+            }
+            if (player2.mudTimer > 0) {
+                player2.mudTimer -= dt * 1000;
+            }
+            if (player1.skin && player1.skin.name === 'Zoomer' && player1.zoomCooldown > 0) {
+                player1.zoomCooldown -= dt * 1000;
+            }
+            if (player2.skin && player2.skin.name === 'Zoomer' && player2.zoomCooldown > 0) {
+                player2.zoomCooldown -= dt * 1000;
+            }
+            if (player1.skin && player1.skin.name === 'Sprinter') {
+                player1.sprintTimer -= dt * 1000;
+                player1.sprintCooldown -= dt * 1000;
+            }
+            if (player2.skin && player2.skin.name === 'Sprinter') {
+                player2.sprintTimer -= dt * 1000;
+                player2.sprintCooldown -= dt * 1000;
+            }
+            if (player1.skin && player1.skin.name === 'Ghost') {
+                player1.ghostTimer -= dt * 1000;
+                player1.ghostCooldown -= dt * 1000;
+            }
+            if (player2.skin && player2.skin.name === 'Ghost') {
+                player2.ghostTimer -= dt * 1000;
+                player2.ghostCooldown -= dt * 1000;
+            }
+            if (player1.skin && player1.skin.name === 'Bouncer') {
+                player1.bounceTimer -= dt * 1000;
+                player1.bounceCooldown -= dt*1000;
+            }
+            if (player2.skin && player2.skin.name === 'Bouncer') {
+                player2.bounceTimer -= dt * 1000;
+                player2.bounceCooldown -= dt*1000;
+            }
+            
+            if (player1.skin && player1.skin.name === 'Shield') {
+                player1.shieldTimer -= dt * 1000;
+                player1.shieldCooldown -= dt * 1000;
+            }
+            if (player2.skin && player2.skin.name === 'Shield') {
+                player2.shieldTimer -= dt * 1000;
+                player2.shieldCooldown -= dt * 1000;
+            }
+
+            movePlayer(player1);
+            movePlayer(player2);
+
+            player1.inMud = isInMud(player1, currentMap);
+            if (player1.inMud && player1.mudTimer <= 0) {
+                player1.mudTimer = MUD_DEBUFF_DURATION;
+            }
+            player2.inMud = isInMud(player2, currentMap);
+            if (player2.inMud && player2.mudTimer <= 0) {
+                player2.mudTimer = MUD_DEBUFF_DURATION;
+            }
+
+            checkBoostPickup(player1);
+            checkBoostPickup(player2);
+
+            if (!crown.picked) {
+                const p1Radius = player1.skin ? player1.skin.size / 2 : BASE_PLAYER_RADIUS;
+                const p2Radius = player2.skin ? player2.skin.size / 2 : BASE_PLAYER_RADIUS;
+                if (Math.hypot(player1.x - crown.x, player1.y - crown.y) < p1Radius + CROWN_SIZE / 2) {
+                    player1.hasCrown = true;
+                    crown.picked = true;
+                } else if (Math.hypot(player2.x - crown.x, player2.y - crown.y) < p2Radius + CROWN_SIZE / 2) {
+                    player2.hasCrown = true;
+                    crown.picked = true;
+                }
+            }
+
+            if (checkCollision(player1, player2)===true) {
+                if (player1.hasCrown) {
+                    player1.hasCrown = false;
+                    player2.hasCrown = true;
+                    player1.stunned = true;
+                    player1.stunTimer = (player2.skin&&player2.skin.name==='Warrior') ? STUN_DURATION*player2.skin.stunMultiplier : STUN_DURATION;
+                    player1.dx = 0;
+                    player1.dy = 0;
+                } else if (player2.hasCrown) {
+                    player2.hasCrown = false;
+                    player1.hasCrown = true;
+                    player2.stunned = true;
+                    player2.stunTimer = (player1.skin&&player1.skin.name==='Warrior') ? STUN_DURATION*player1.skin.stunMultiplier : STUN_DURATION;
+                    player2.dx = 0;
+                    player2.dy = 0;
+                }
+            } else if (checkCollision(player1, player2)==="back"){
+                if (player1.hasCrown) {
+                    player2.stunned = true;
+                    player2.stunTimer = (player2.skin&&player2.skin.name==='Warrior') ? STUN_DURATION*player2.skin.stunMultiplier : STUN_DURATION;
+                    player2.dx = 0;
+                    player2.dy = 0;
+                } else if (player2.hasCrown) {
+                    player1.stunned = true;
+                    player1.stunTimer = (player1.skin&&player1.skin.name==='Warrior') ? STUN_DURATION*player1.skin.stunMultiplier : STUN_DURATION;
+                    player1.dx = 0;
+                    player1.dy = 0;
+                }
+            }
+
+            if (player1.hasCrown) {
+                player1.holdTime += dt * 1000;
+            }
+            if (player2.hasCrown) {
+                player2.holdTime += dt * 1000;
+            }
+
+            if (player1.holdTime >= WIN_TIME) {
+                gameState = 'ended';
+                winMessage.textContent = 'P1 Wins!';
+                winMessage.style.display = 'block';
+                restartButton.style.display = 'block';
+            } else if (player2.holdTime >= WIN_TIME) {
+                gameState = 'ended';
+                winMessage.textContent = 'P2 Wins!';
+                winMessage.style.display = 'block';
+                restartButton.style.display = 'block';
+            }
+
+            boostSpawnTimer -= dt * 1000;
+            if (boostSpawnTimer <= 0) {
+                spawnSpeedBoost(currentMap);
+                boostSpawnTimer = BOOST_SPAWN_INTERVAL;
+            }
+
+            info.innerHTML = `
+                P1: ${Math.floor(player1.holdTime / 1000)}s (${player1.skin ? player1.skin.name : 'No Skin'})<br>
+                P2: ${Math.floor(player2.holdTime / 1000)}s (${player2.skin ? player2.skin.name : 'No Skin'})<br>
+                Map: ${currentMap ? currentMap.name : 'Not Selected'}
+            `;
+        }
+
+        let currentPlayer = 1;
+        function setupSkinSelection() {
+            skinSelection.innerHTML = `P${currentPlayer} select skin:`;
+            for (let skinName in skins) {
+                if (!usedSkins.includes(skinName)) {
+                    const button = document.createElement('button');
+                    button.className = 'skin-button';
+                    button.textContent = skins[skinName].name;
+                    button.onclick = () => {
+                        if (currentPlayer === 1) {
+                            player1.skin = skins[skinName];
+                            usedSkins.push(skinName);
+                            currentPlayer = 2;
+                            setupSkinSelection();
+                        } else {
+                            player2.skin = skins[skinName];
+                            usedSkins.push(skinName);
+                            startGame();
+                        }
+                    };
+                    skinSelection.appendChild(button);
+                }
+            }
+            
+        }
+
+        function startGame() {
+            currentMap = maps[Math.floor(Math.random() * maps.length)];
+            currentMap.obstacles = currentMap.obstacles || [];
+    currentMap.obstacles = currentMap.obstacles.map(obs => new Obstacle(obs.x, obs.y, obs.w, obs.h, obs.c));
+    
+    currentMap.mudPatches = currentMap.mudPatches.map(mud => new MudPatch(mud.x, mud.y, mud.r));
+    aiNavigationGrid = null;
+    initializeNavigationGrid();
+    aiLastSkinName = player2.skin ? player2.skin.name : 'default';
+
+    // Reset AI pathfinding
+    aiPath = [];
+    aiCurrentWaypointIndex = 0;
+    aiReplanTimer = AI_REPLAN_INTERVAL;
+            player1.x = 50;
+            player1.y = MAP_HEIGHT / 2;
+            player2.x = MAP_WIDTH - 50;
+            player2.y = MAP_HEIGHT / 2;
+            crown.x = MAP_WIDTH / 2;
+            crown.y = MAP_HEIGHT / 2;
+            gameState = 'countdown';
+            startScreen.style.display = 'none';
+            countdownEl.style.display = 'block';
+            countdownEl.textContent = countdown;
+            countdownTimer = countdownInterval;
+        }
+
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+        document.getElementById('pvp-mode').addEventListener('click', function() {
+    gameMode = 'pvp';
+    this.classList.add('selected');
+    document.getElementById('pve-mode').classList.remove('selected');
+    document.getElementById('ai-difficulty').style.display = 'none';
+});
+
+document.getElementById('pve-mode').addEventListener('click', function() {
+    gameMode = 'pve';
+    this.classList.add('selected');
+    document.getElementById('pvp-mode').classList.remove('selected');
+    document.getElementById('ai-difficulty').style.display = 'block';
+});
+document.getElementById('pvp-mode').classList.add('selected');
+document.getElementById('ai-difficulty-slider').addEventListener('input', function() {
+    aiDifficulty = parseInt(this.value);
+    document.getElementById('ai-difficulty-value').textContent = aiDifficultyLevels[aiDifficulty].name;
+});
+
+        restartButton.addEventListener('click', resetGame);
+
+        let lastTime = 0;
+        function gameLoop(time) {
+    const dt = (time - lastTime) / 1000;
+    lastTime = time;
+
+    updateGame(dt);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (gameState === 'playing' || gameState === 'countdown') {
+        drawViewport(player1, 0);
+        drawViewport(player2, VIEW_WIDTH);
+    }
+    
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.moveTo(canvas.width/2-2, canvas.height-80);
+    ctx.lineTo(canvas.width/2+2, canvas.height-80);
+    ctx.lineTo(canvas.width/2+2, 0);
+    ctx.lineTo(canvas.width/2-2, 0);
+    ctx.closePath();
+    ctx.fill();
+    
+    requestAnimationFrame(gameLoop);
+}
+        setupSkinSelection();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
+
+
+       
