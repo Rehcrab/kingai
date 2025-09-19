@@ -2617,11 +2617,10 @@ function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
         function movePlayer(player) {
     if (player.stunned) return;
     
-    // Apply wall sliding only for human players (not AI)
-    if (player === player1 || player === player2) { // Apply wall sliding to both player1 and player2
+     // Apply wall sliding to both player1 and player2
+if (!(player.skin && player.skin.name === 'Ghost' && player.ghostTimer > 0)) {
         handleWallSliding(player);
-    }
-    
+    }    
     let newX = player.x + player.dx;
     let newY = player.y + player.dy;
 
@@ -3287,5 +3286,6 @@ document.getElementById('ai-difficulty-slider').addEventListener('input', functi
 
 
        
+
 
 
