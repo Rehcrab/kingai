@@ -2616,7 +2616,31 @@ function circleRectCollision(cx, cy, r, rx, ry, rw, rh) {
 
         function movePlayer(player) {
     if (player.stunned) return;
+                const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
+
+    let onObstacle = false;
+    for (let obs of currentMap.obstacles) {
+        if (circleRectCollision(player.x, player.y, radius, obs.x, obs.y, obs.w, obs.h)) {
+            onObstacle = true;
+            break;
+        }
+    }
     
+    if (player.skin && player.skin.name === 'Ghost' && player.ghostTimer <= 0 && onObstacle) {
+        let attempts = 0;
+        while (onObstacle && attempts < 10000) {
+            player.x = Math.random() * (MAP_WIDTH - 2 * radius) + radius;
+            player.y = Math.random() * (MAP_HEIGHT - 2 * radius) + radius;
+            onObstacle = false;
+            for (let obs of currentMap.obstacles) {
+                if (circleRectCollision(player.x, player.y, radius, obs.x, obs.y, obs.w, obs.h)) {
+                    onObstacle = true;
+                    break;
+                }
+            }
+            attempts++;
+        }
+    }
      // Apply wall sliding to both player1 and player2
 if (player.ghostTimer <= 0) {
         handleWallSliding(player);
@@ -2624,7 +2648,6 @@ if (player.ghostTimer <= 0) {
     let newX = player.x + player.dx;
     let newY = player.y + player.dy;
 
-    const radius = player.skin ? player.skin.size / 2 : BASE_PLAYER_RADIUS;
     newX = Math.max(radius, Math.min(MAP_WIDTH - radius, newX));
     newY = Math.max(radius, Math.min(MAP_HEIGHT - radius, newY));
 
@@ -3286,6 +3309,7 @@ document.getElementById('ai-difficulty-slider').addEventListener('input', functi
 
 
        
+
 
 
 
